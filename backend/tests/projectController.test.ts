@@ -169,7 +169,7 @@ describe("projectController", () => {
         it("returns 500 when project creation fails", async () => {
             const errorSpy = vi
                 .spyOn(console, "error")
-                .mockImplementation(() => {});
+                .mockImplementation(() => { });
 
             createMock.mockRejectedValue(new Error("Database failure"));
 
@@ -219,7 +219,7 @@ describe("projectController", () => {
         it("returns 500 when fetching projects fails", async () => {
             const errorSpy = vi
                 .spyOn(console, "error")
-                .mockImplementation(() => {});
+                .mockImplementation(() => { });
 
             findMock.mockImplementation(() => {
                 throw new Error("Database failure");
@@ -256,20 +256,37 @@ describe("projectController", () => {
             expect(res.status).toHaveBeenCalledWith(400);
         });
 
+
+        it("rejects a malformed project ID before database lookup", async () => {
+            const req = makeRequest({
+                params: { id: "not-a-valid-object-id" },
+            });
+            const res = makeResponse();
+
+            await deleteProject(req, res);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(res.json).toHaveBeenCalledWith({
+                message: "Invalid project ID",
+            });
+            expect(findOneAndDeleteMock).not.toHaveBeenCalled();
+        });
+
         it("returns 404 when the user's project does not exist", async () => {
             findOneAndDeleteMock.mockResolvedValue(null);
 
             const req = makeRequest({
-                params: { id: "project-missing" },
+                params: { id: "507f1f77bcf86cd799439011" },
             });
             const res = makeResponse();
 
             await deleteProject(req, res);
 
             expect(findOneAndDeleteMock).toHaveBeenCalledWith({
-                _id: "project-missing",
+                _id: "507f1f77bcf86cd799439011",
                 userId: "user-123",
             });
+
             expect(res.status).toHaveBeenCalledWith(404);
         });
 
@@ -279,14 +296,14 @@ describe("projectController", () => {
             });
 
             const req = makeRequest({
-                params: { id: "project-123" },
+                params: { id: "507f1f77bcf86cd799439012" },
             });
             const res = makeResponse();
 
             await deleteProject(req, res);
 
             expect(findOneAndDeleteMock).toHaveBeenCalledWith({
-                _id: "project-123",
+                _id: "507f1f77bcf86cd799439012",
                 userId: "user-123",
             });
             expect(res.status).toHaveBeenCalledWith(200);

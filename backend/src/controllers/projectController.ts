@@ -3,7 +3,7 @@ import { Response } from "express";
 import { Project } from "../models/Project";
 import { AuthRequest } from "../middleware/authMiddleware";
 
-
+import { Types } from "mongoose";
 /*
  * ==========================================
  * CREATE PROJECT
@@ -227,14 +227,13 @@ export async function deleteProject(
 
         if (
             !projectId ||
-            Array.isArray(projectId)
+            Array.isArray(projectId) ||
+            !Types.ObjectId.isValid(projectId)
         ) {
             return res.status(400).json({
-                message:
-                    "Invalid project ID"
+                message: "Invalid project ID"
             });
         }
-
 
         const project =
             await Project.findOneAndDelete({
