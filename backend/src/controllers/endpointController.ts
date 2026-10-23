@@ -1,4 +1,7 @@
+
 import { Response } from "express";
+import { Types } from "mongoose";
+
 import { Endpoint } from "../models/Endpoint";
 import { Project } from "../models/Project";
 import { AuthRequest } from "../middleware/authMiddleware";
@@ -15,12 +18,7 @@ export async function createEndpoint(
             method
         } = req.body;
 
-        /*
-         * ==========================================
-         * AUTH CHECK
-         * ==========================================
-         */
-
+        // AUTH CHECK
         if (!req.userId) {
             return res.status(401).json({
                 message: "Unauthorized",
@@ -28,13 +26,7 @@ export async function createEndpoint(
             });
         }
 
-
-        /*
-         * ==========================================
-         * REQUIRED FIELDS
-         * ==========================================
-         */
-
+        // REQUIRED FIELDS
         if (
             !projectId ||
             !name ||
@@ -48,13 +40,18 @@ export async function createEndpoint(
             });
         }
 
+        // VALIDATE PROJECT ID
+        if (
+            typeof projectId !== "string" ||
+            !Types.ObjectId.isValid(projectId)
+        ) {
+            return res.status(400).json({
+                message: "Invalid project ID",
+                error: "INVALID_PROJECT_ID"
+            });
+        }
 
-        /*
-         * ==========================================
-         * VALIDATE NAME
-         * ==========================================
-         */
-
+        // VALIDATE NAME
         if (
             typeof name !== "string" ||
             name.trim() === ""
@@ -65,7 +62,6 @@ export async function createEndpoint(
             });
         }
 
-
         if (name.trim().length > 200) {
             return res.status(400).json({
                 message:
@@ -74,13 +70,7 @@ export async function createEndpoint(
             });
         }
 
-
-        /*
-         * ==========================================
-         * VALIDATE URL
-         * ==========================================
-         */
-
+        // VALIDATE URL
         if (typeof url !== "string") {
             return res.status(400).json({
                 message: "Invalid endpoint URL",
@@ -91,8 +81,7 @@ export async function createEndpoint(
         const trimmedUrl = url.trim();
 
         try {
-            const parsedUrl =
-                new URL(trimmedUrl);
+            const parsedUrl = new URL(trimmedUrl);
 
             if (
                 parsedUrl.protocol !== "http:" &&
@@ -103,7 +92,6 @@ export async function createEndpoint(
                     error: "INVALID_ENDPOINT_URL"
                 });
             }
-
         } catch {
             return res.status(400).json({
                 message: "Invalid endpoint URL",
@@ -111,13 +99,7 @@ export async function createEndpoint(
             });
         }
 
-
-        /*
-         * ==========================================
-         * VALIDATE METHOD
-         * ==========================================
-         */
-
+        // VALIDATE HTTP METHOD
         if (typeof method !== "string") {
             return res.status(400).json({
                 message: "Invalid HTTP method",
@@ -125,8 +107,7 @@ export async function createEndpoint(
             });
         }
 
-        const normalizedMethod =
-            method.trim().toUpperCase();
+        const normalizedMethod = method.trim().toUpperCase();
 
         const allowedMethods = [
             "GET",
@@ -136,30 +117,18 @@ export async function createEndpoint(
             "DELETE"
         ];
 
-        if (
-            !allowedMethods.includes(
-                normalizedMethod
-            )
-        ) {
+        if (!allowedMethods.includes(normalizedMethod)) {
             return res.status(400).json({
-                message:
-                    "Invalid HTTP method",
+                message: "Invalid HTTP method",
                 error: "INVALID_HTTP_METHOD"
             });
         }
 
-
-        /*
-         * ==========================================
-         * VERIFY PROJECT OWNERSHIP
-         * ==========================================
-         */
-
-        const project =
-            await Project.findOne({
-                _id: projectId,
-                userId: req.userId
-            });
+        // VERIFY PROJECT OWNERSHIP
+        const project = await Project.findOne({
+            _id: projectId,
+            userId: req.userId
+        });
 
         if (!project) {
             return res.status(404).json({
@@ -168,166 +137,87 @@ export async function createEndpoint(
             });
         }
 
-
-        /*
-         * ==========================================
-         * CREATE ENDPOINT
-         * ==========================================
-         */
-
-        const endpoint =
-            await Endpoint.create({
-                projectId:
-                    project._id.toString(),
-
-                name:
-                    name.trim(),
-
-                url:
-                    trimmedUrl,
-
-                method:
-                    normalizedMethod
-            });
-
-
-        /*
-         * ==========================================
-         * SUCCESS
-         * ==========================================
-         */
-
-        return res.status(201).json({
-            message:
-                "Endpoint created successfully",
-
-            endpoint
+        // CREATE ENDPOINT
+        const endpoint = await Endpoint.create({
+            projectId: project._id.toString(),
+            name: name.trim(),
+            url: trimmedUrl,
+            method: normalizedMethod
         });
 
+        return res.status(201).json({
+            message: "Endpoint created successfully",
+            endpoint
+        });
     } catch (error) {
-
-        console.error(
-            "Create endpoint error:",
-            error
-        );
+        console.error("Create endpoint error:", error);
 
         return res.status(500).json({
-            message:
-                "Internal server error",
-
-            error:
-                "INTERNAL_SERVER_ERROR"
+            message: "Internal server error",
+            error: "INTERNAL_SERVER_ERROR"
         });
     }
 }
-
 
 export async function getEndpoints(
     req: AuthRequest,
     res: Response
 ) {
     try {
+        const projectId = req.params.projectId;
 
-        const projectId =
-            req.params.projectId;
-
-
-        /*
-         * ==========================================
-         * VALIDATE PROJECT ID
-         * ==========================================
-         */
-
+        // VALIDATE PROJECT ID
         if (
             !projectId ||
-            Array.isArray(projectId)
+            Array.isArray(projectId) ||
+            !Types.ObjectId.isValid(projectId)
         ) {
             return res.status(400).json({
-                message:
-                    "Invalid project ID",
-
-                error:
-                    "INVALID_PROJECT_ID"
+                message: "Invalid project ID",
+                error: "INVALID_PROJECT_ID"
             });
         }
 
-
-        /*
-         * ==========================================
-         * AUTH CHECK
-         * ==========================================
-         */
-
+        // AUTH CHECK
         if (!req.userId) {
             return res.status(401).json({
-                message:
-                    "Unauthorized",
-
-                error:
-                    "UNAUTHORIZED"
+                message: "Unauthorized",
+                error: "UNAUTHORIZED"
             });
         }
 
-
-        /*
-         * ==========================================
-         * VERIFY PROJECT OWNERSHIP
-         * ==========================================
-         */
-
-        const project =
-            await Project.findOne({
-                _id: projectId,
-                userId: req.userId
-            });
+        // VERIFY PROJECT OWNERSHIP
+        const project = await Project.findOne({
+            _id: projectId,
+            userId: req.userId
+        });
 
         if (!project) {
             return res.status(404).json({
-                message:
-                    "Project not found",
-
-                error:
-                    "PROJECT_NOT_FOUND"
+                message: "Project not found",
+                error: "PROJECT_NOT_FOUND"
             });
         }
 
-
-        /*
-         * ==========================================
-         * GET ENDPOINTS
-         * ==========================================
-         */
-
-        const endpoints =
-            await Endpoint.find({
-                projectId:
-                    project._id
-            }).sort({
-                createdAt: -1
-            });
-
+        // GET ENDPOINTS
+        const endpoints = await Endpoint.find({
+            projectId: project._id
+        }).sort({
+            createdAt: -1
+        });
 
         return res.status(200).json({
             endpoints
         });
-
     } catch (error) {
-
-        console.error(
-            "Get endpoints error:",
-            error
-        );
+        console.error("Get endpoints error:", error);
 
         return res.status(500).json({
-            message:
-                "Internal server error",
-
-            error:
-                "INTERNAL_SERVER_ERROR"
+            message: "Internal server error",
+            error: "INTERNAL_SERVER_ERROR"
         });
     }
 }
-
 
 export async function deleteEndpoint(
     req: AuthRequest,
@@ -336,17 +226,23 @@ export async function deleteEndpoint(
     try {
         const endpointId = req.params.endpointId;
 
-        if (!endpointId || Array.isArray(endpointId)) {
+        // VALIDATE ENDPOINT ID
+        if (
+            !endpointId ||
+            Array.isArray(endpointId) ||
+            !Types.ObjectId.isValid(endpointId)
+        ) {
             return res.status(400).json({
                 message: "Invalid endpoint ID",
-                error: "INVALID_ENDPOINT_ID",
+                error: "INVALID_ENDPOINT_ID"
             });
         }
 
+        // AUTH CHECK
         if (!req.userId) {
             return res.status(401).json({
                 message: "Unauthorized",
-                error: "UNAUTHORIZED",
+                error: "UNAUTHORIZED"
             });
         }
 
@@ -355,34 +251,37 @@ export async function deleteEndpoint(
         if (!endpoint) {
             return res.status(404).json({
                 message: "Endpoint not found",
-                error: "ENDPOINT_NOT_FOUND",
+                error: "ENDPOINT_NOT_FOUND"
             });
         }
 
+        // VERIFY PROJECT OWNERSHIP
         const project = await Project.findOne({
             _id: endpoint.projectId,
-            userId: req.userId,
+            userId: req.userId
         });
 
         if (!project) {
             return res.status(404).json({
                 message: "Endpoint not found",
-                error: "ENDPOINT_NOT_FOUND",
+                error: "ENDPOINT_NOT_FOUND"
             });
         }
 
-        await Endpoint.deleteOne({ _id: endpoint._id });
+        await Endpoint.deleteOne({
+            _id: endpoint._id
+        });
 
         return res.status(200).json({
             message: "Endpoint deleted successfully",
-            endpointId: endpoint._id.toString(),
+            endpointId: endpoint._id.toString()
         });
     } catch (error) {
         console.error("Delete endpoint error:", error);
 
         return res.status(500).json({
             message: "Internal server error",
-            error: "INTERNAL_SERVER_ERROR",
+            error: "INTERNAL_SERVER_ERROR"
         });
     }
 }
