@@ -21,7 +21,7 @@ app.use(
     }),
 );
 
-app.use(express.json());
+app.use(express.json({ limit: "100kb" }));
 
 app.get("/", (_req, res) => {
     res.json({
@@ -49,6 +49,7 @@ app.use((req, res) => {
     });
 });
 
+
 app.use(
     (
         err: unknown,
@@ -56,11 +57,27 @@ app.use(
         res: express.Response,
         next: express.NextFunction,
     ) => {
-        console.error("Unhandled request error:", err);
-
         if (res.headersSent) {
             return next(err);
         }
+
+        if (typeof err === "object" && err !== null && "type" in err) {
+            const bodyError = err as { type?: string };
+
+            if (bodyError.type === "entity.too.large") {
+                return res.status(413).json({
+                    message: "Request body is too large",
+                });
+            }
+
+            if (bodyError.type === "entity.parse.failed") {
+                return res.status(400).json({
+                    message: "Malformed JSON request body",
+                });
+            }
+        }
+
+        console.error("Unhandled request error:", err);
 
         return res.status(500).json({
             message: "Internal server error",

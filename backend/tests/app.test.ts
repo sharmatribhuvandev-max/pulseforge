@@ -67,6 +67,32 @@ describe("Express app HTTP integration", () => {
         );
     });
 
+    
+    it("returns 400 for malformed JSON", async () => {
+        const response = await request(app)
+            .post("/route-that-does-not-exist")
+            .set("Content-Type", "application/json")
+            .send('{"test":');
+
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({
+            message: "Malformed JSON request body",
+        });
+    });
+
+    it("returns 413 for a JSON body larger than 100 KB", async () => {
+        const response = await request(app)
+            .post("/route-that-does-not-exist")
+            .send({
+                data: "a".repeat(110 * 1024),
+            });
+
+        expect(response.status).toBe(413);
+        expect(response.body).toEqual({
+            message: "Request body is too large",
+        });
+    });
+
     it("sets the configured CORS origin", async () => {
         const response = await request(app)
             .get("/")
