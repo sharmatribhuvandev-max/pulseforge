@@ -1,10 +1,23 @@
+
 import { Request, Response } from "express";
 import { User } from "../models/User";
 import { hashPassword, comparePassword } from "../utils/password";
 import { generateToken } from "../utils/jwt";
 
+const MAX_NAME_LENGTH = 80;
+const MAX_EMAIL_LENGTH = 254;
+const MIN_PASSWORD_LENGTH = 6;
+const MAX_PASSWORD_BYTES = 72;
+
 function isValidEmail(email: string): boolean {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function isValidPassword(password: string): boolean {
+    return (
+        password.length >= MIN_PASSWORD_LENGTH &&
+        Buffer.byteLength(password, "utf8") <= MAX_PASSWORD_BYTES
+    );
 }
 
 export async function signup(req: Request, res: Response) {
@@ -27,15 +40,30 @@ export async function signup(req: Request, res: Response) {
         const normalizedName = name.trim();
         const normalizedEmail = email.trim().toLowerCase();
 
-        if (!isValidEmail(normalizedEmail)) {
+        if (normalizedName.length > MAX_NAME_LENGTH) {
+            return res.status(400).json({
+                message: `Name must be ${MAX_NAME_LENGTH} characters or fewer`
+            });
+        }
+
+        if (
+            normalizedEmail.length > MAX_EMAIL_LENGTH ||
+            !isValidEmail(normalizedEmail)
+        ) {
             return res.status(400).json({
                 message: "Please provide a valid email address"
             });
         }
 
-        if (password.length < 6) {
+        if (password.length < MIN_PASSWORD_LENGTH) {
             return res.status(400).json({
-                message: "Password must be at least 6 characters"
+                message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters`
+            });
+        }
+
+        if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
+            return res.status(400).json({
+                message: `Password must not exceed ${MAX_PASSWORD_BYTES} UTF-8 bytes`
             });
         }
 
@@ -105,9 +133,18 @@ export async function signin(req: Request, res: Response) {
 
         const normalizedEmail = email.trim().toLowerCase();
 
-        if (!isValidEmail(normalizedEmail)) {
+        if (
+            normalizedEmail.length > MAX_EMAIL_LENGTH ||
+            !isValidEmail(normalizedEmail)
+        ) {
             return res.status(400).json({
                 message: "Please provide a valid email address"
+            });
+        }
+
+        if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
+            return res.status(400).json({
+                message: "Invalid email or password"
             });
         }
 

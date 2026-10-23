@@ -121,6 +121,51 @@ describe("PulseForge authentication", () => {
             expect(User.create).not.toHaveBeenCalled();
         });
 
+        it("rejects names longer than 80 characters", async () => {
+            const req = createRequest({
+                name: "A".repeat(81),
+                email: "test@example.com",
+                password: "password123"
+            });
+            const res = createResponse();
+
+            await signup(req, res);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(User.findOne).not.toHaveBeenCalled();
+            expect(User.create).not.toHaveBeenCalled();
+        });
+
+        it("rejects emails longer than 254 characters", async () => {
+            const req = createRequest({
+                name: "Test User",
+                email: `${"a".repeat(243)}@example.com`,
+                password: "password123"
+            });
+            const res = createResponse();
+
+            await signup(req, res);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(User.findOne).not.toHaveBeenCalled();
+            expect(User.create).not.toHaveBeenCalled();
+        });
+
+        it("rejects passwords longer than 72 UTF-8 bytes", async () => {
+            const req = createRequest({
+                name: "Test User",
+                email: "test@example.com",
+                password: "a".repeat(73)
+            });
+            const res = createResponse();
+
+            await signup(req, res);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(hashPassword).not.toHaveBeenCalled();
+            expect(User.create).not.toHaveBeenCalled();
+        });
+
         it("creates a user and returns a token", async () => {
             vi.mocked(User.findOne).mockResolvedValue(null as never);
             vi.mocked(hashPassword).mockResolvedValue("hashed-password");
@@ -191,6 +236,35 @@ describe("PulseForge authentication", () => {
             expect(res.json).toHaveBeenCalledWith({
                 message: "Please provide a valid email address"
             });
+        });
+
+
+        it("rejects emails longer than 254 characters before database lookup", async () => {
+            const req = createRequest({
+                email: `${"a".repeat(243)}@example.com`,
+                password: "password123"
+            });
+            const res = createResponse();
+
+            await signin(req, res);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(User.findOne).not.toHaveBeenCalled();
+            expect(comparePassword).not.toHaveBeenCalled();
+        });
+
+        it("rejects passwords longer than 72 UTF-8 bytes before database lookup", async () => {
+            const req = createRequest({
+                email: "test@example.com",
+                password: "a".repeat(73)
+            });
+            const res = createResponse();
+
+            await signin(req, res);
+
+            expect(res.status).toHaveBeenCalledWith(400);
+            expect(User.findOne).not.toHaveBeenCalled();
+            expect(comparePassword).not.toHaveBeenCalled();
         });
 
         it("rejects an unknown user", async () => {
