@@ -24,6 +24,8 @@ import {
     signin
 } from "../src/controllers/authController";
 import { generateToken } from "../src/utils/jwt";
+import jwt from "jsonwebtoken";
+import { env } from "../src/config/env";
 import { authMiddleware, AuthRequest } from "../src/middleware/authMiddleware";
 
 function createResponse() {
@@ -392,6 +394,76 @@ describe("PulseForge authentication", () => {
 
             expect(req.userId).toBe("user-123");
             expect(next).toHaveBeenCalledOnce();
+        });
+
+
+        it("rejects a token with a missing userId", () => {
+            const token = jwt.sign(
+                { role: "user" },
+                env.jwtSecret,
+                { expiresIn: "7d" }
+            );
+
+            const req = createRequest() as AuthRequest;
+            req.headers.authorization = `Bearer ${token}`;
+
+            const res = createResponse();
+            const next = vi.fn();
+
+            authMiddleware(req, res, next);
+
+            expect(res.status).toHaveBeenCalledWith(401);
+            expect(res.json).toHaveBeenCalledWith({
+                message: "Invalid or expired token"
+            });
+            expect(req.userId).toBeUndefined();
+            expect(next).not.toHaveBeenCalled();
+        });
+
+        it("rejects a token with an empty userId", () => {
+            const token = jwt.sign(
+                { userId: "   " },
+                env.jwtSecret,
+                { expiresIn: "7d" }
+            );
+
+            const req = createRequest() as AuthRequest;
+            req.headers.authorization = `Bearer ${token}`;
+
+            const res = createResponse();
+            const next = vi.fn();
+
+            authMiddleware(req, res, next);
+
+            expect(res.status).toHaveBeenCalledWith(401);
+            expect(res.json).toHaveBeenCalledWith({
+                message: "Invalid or expired token"
+            });
+            expect(req.userId).toBeUndefined();
+            expect(next).not.toHaveBeenCalled();
+        });
+
+        it("rejects a token with a non-string userId", () => {
+            const token = jwt.sign(
+                { userId: 123 },
+                env.jwtSecret,
+                { expiresIn: "7d" }
+            );
+
+            const req = createRequest() as AuthRequest;
+            req.headers.authorization = `Bearer ${token}`;
+
+            const res = createResponse();
+            const next = vi.fn();
+
+            authMiddleware(req, res, next);
+
+            expect(res.status).toHaveBeenCalledWith(401);
+            expect(res.json).toHaveBeenCalledWith({
+                message: "Invalid or expired token"
+            });
+            expect(req.userId).toBeUndefined();
+            expect(next).not.toHaveBeenCalled();
         });
 
         it("rejects an invalid token", () => {
