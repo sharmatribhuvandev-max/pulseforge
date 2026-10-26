@@ -9,6 +9,13 @@ const MAX_LATENCY = 30000;
 const MIN_STATUS_CODE = 100;
 const MAX_STATUS_CODE = 599;
 
+function isValidObjectId(value: unknown): value is string {
+    return (
+        typeof value === "string" &&
+        /^[0-9a-fA-F]{24}$/.test(value)
+    );
+}
+
 function validateChaosValues(
     latency: unknown,
     errorRate: unknown,
@@ -75,7 +82,6 @@ export async function createChaosRule(
             statusCode
         } = req.body;
 
-        // AUTH
         if (!req.userId) {
             return res.status(401).json({
                 message: "Unauthorized",
@@ -83,7 +89,6 @@ export async function createChaosRule(
             });
         }
 
-        // REQUIRED ENDPOINT
         if (!endpointId) {
             return res.status(400).json({
                 message: "endpointId is required",
@@ -91,7 +96,13 @@ export async function createChaosRule(
             });
         }
 
-        // ENABLED VALIDATION
+        if (!isValidObjectId(endpointId)) {
+            return res.status(400).json({
+                message: "Invalid endpoint ID",
+                error: "INVALID_ENDPOINT_ID"
+            });
+        }
+
         if (
             enabled !== undefined &&
             typeof enabled !== "boolean"
@@ -102,7 +113,6 @@ export async function createChaosRule(
             });
         }
 
-        // VALIDATE CHAOS VALUES
         const validationError = validateChaosValues(
             latency,
             errorRate,
@@ -113,7 +123,6 @@ export async function createChaosRule(
             return res.status(400).json(validationError);
         }
 
-        // FIND ENDPOINT
         const endpoint = await Endpoint.findById(endpointId);
 
         if (!endpoint) {
@@ -123,7 +132,6 @@ export async function createChaosRule(
             });
         }
 
-        // VERIFY PROJECT OWNERSHIP
         const project = await Project.findOne({
             _id: endpoint.projectId,
             userId: req.userId
@@ -136,7 +144,6 @@ export async function createChaosRule(
             });
         }
 
-        // ENSURE ONLY ONE ENABLED RULE PER ENDPOINT
         if (enabled === true) {
             await ChaosRule.updateMany(
                 {
@@ -149,7 +156,6 @@ export async function createChaosRule(
             );
         }
 
-        // CREATE RULE
         const chaosRule = await ChaosRule.create({
             endpointId: endpoint._id,
             enabled: enabled ?? false,
@@ -179,15 +185,6 @@ export async function getChaosRules(
     try {
         const endpointId = req.params.endpointId;
 
-        // VALIDATE ENDPOINT ID
-        if (!endpointId || Array.isArray(endpointId)) {
-            return res.status(400).json({
-                message: "Invalid endpoint ID",
-                error: "INVALID_ENDPOINT_ID"
-            });
-        }
-
-        // AUTH
         if (!req.userId) {
             return res.status(401).json({
                 message: "Unauthorized",
@@ -195,7 +192,13 @@ export async function getChaosRules(
             });
         }
 
-        // FIND ENDPOINT
+        if (!isValidObjectId(endpointId)) {
+            return res.status(400).json({
+                message: "Invalid endpoint ID",
+                error: "INVALID_ENDPOINT_ID"
+            });
+        }
+
         const endpoint = await Endpoint.findById(endpointId);
 
         if (!endpoint) {
@@ -205,7 +208,6 @@ export async function getChaosRules(
             });
         }
 
-        // VERIFY OWNERSHIP
         const project = await Project.findOne({
             _id: endpoint.projectId,
             userId: req.userId
@@ -218,7 +220,6 @@ export async function getChaosRules(
             });
         }
 
-        // GET RULES
         const chaosRules = await ChaosRule.find({
             endpointId: endpoint._id
         }).sort({
@@ -245,15 +246,6 @@ export async function updateChaosRule(
     try {
         const ruleId = req.params.ruleId;
 
-        // VALIDATE RULE ID
-        if (!ruleId || Array.isArray(ruleId)) {
-            return res.status(400).json({
-                message: "Invalid rule ID",
-                error: "INVALID_RULE_ID"
-            });
-        }
-
-        // AUTH
         if (!req.userId) {
             return res.status(401).json({
                 message: "Unauthorized",
@@ -261,7 +253,13 @@ export async function updateChaosRule(
             });
         }
 
-        // FIND RULE
+        if (!isValidObjectId(ruleId)) {
+            return res.status(400).json({
+                message: "Invalid rule ID",
+                error: "INVALID_RULE_ID"
+            });
+        }
+
         const rule = await ChaosRule.findById(ruleId);
 
         if (!rule) {
@@ -271,7 +269,6 @@ export async function updateChaosRule(
             });
         }
 
-        // FIND ENDPOINT
         const endpoint = await Endpoint.findById(rule.endpointId);
 
         if (!endpoint) {
@@ -281,7 +278,6 @@ export async function updateChaosRule(
             });
         }
 
-        // VERIFY OWNERSHIP
         const project = await Project.findOne({
             _id: endpoint.projectId,
             userId: req.userId
@@ -301,7 +297,6 @@ export async function updateChaosRule(
             statusCode
         } = req.body;
 
-        // ENABLED VALIDATION
         if (
             enabled !== undefined &&
             typeof enabled !== "boolean"
@@ -312,7 +307,6 @@ export async function updateChaosRule(
             });
         }
 
-        // VALIDATE VALUES
         const validationError = validateChaosValues(
             latency,
             errorRate,
@@ -323,12 +317,6 @@ export async function updateChaosRule(
             return res.status(400).json(validationError);
         }
 
-        /*
-         * If this rule is being enabled, disable other enabled
-         * rules belonging to the same endpoint first.
-         *
-         * Keep this rule excluded so it can be enabled below.
-         */
         if (enabled === true) {
             await ChaosRule.updateMany(
                 {
@@ -342,7 +330,6 @@ export async function updateChaosRule(
             );
         }
 
-        // UPDATE VALUES
         if (enabled !== undefined) {
             rule.enabled = enabled;
         }
