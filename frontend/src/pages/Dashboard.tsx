@@ -60,8 +60,24 @@ function Dashboard() {
     /*
      * Analytics filters
      */
-    const [minutes, setMinutes] =
-        useState(60);
+
+    const [minutes, setMinutes] = useState<number | null>(() => {
+        const savedMinutes = localStorage.getItem(
+            "pulseforge-analytics-minutes"
+        );
+
+        if (savedMinutes === "all") {
+            return null;
+        }
+
+        const parsedMinutes = Number(savedMinutes);
+        const validOptions = [5, 15, 30, 60, 1440];
+
+        return validOptions.includes(parsedMinutes)
+            ? parsedMinutes
+            : 1440;
+    });
+
 
     const [filterEndpoint, setFilterEndpoint] =
         useState("");
@@ -71,6 +87,13 @@ function Dashboard() {
 
     const [filterStatus, setFilterStatus] =
         useState("");
+
+    useEffect(() => {
+        localStorage.setItem(
+            "pulseforge-analytics-minutes",
+            minutes === null ? "all" : String(minutes)
+        );
+    }, [minutes]);
 
 
     /*
@@ -184,32 +207,28 @@ function Dashboard() {
             /*
              * Build analytics filters
              */
+
             const analyticsFilters = {
+                ...(minutes !== null ? { minutes } : {}),
 
-                minutes,
-
-                ...(filterEndpoint
+                ...(filterEndpoint.trim()
                     ? {
-                        endpoint:
-                            filterEndpoint.trim(),
+                        endpoint: filterEndpoint.trim(),
                     }
                     : {}),
 
                 ...(filterMethod
                     ? {
-                        method:
-                            filterMethod,
+                        method: filterMethod,
                     }
                     : {}),
 
                 ...(filterStatus
                     ? {
-                        status:
-                            filterStatus,
+                        status: filterStatus,
                     }
                     : {}),
             };
-
 
             /*
              * Load each project

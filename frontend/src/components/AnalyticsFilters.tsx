@@ -1,12 +1,11 @@
 interface AnalyticsFiltersProps {
-    minutes: number;
+    minutes: number | null;
     endpoint: string;
     method: string;
     status: string;
 
-    onMinutesChange: (value: number) => void;
-    onEndpointChange: (value: string) => void;
-    onMethodChange: (value: string) => void;
+    onMinutesChange: (value: number | null) => void;
+    onEndpointChange: (value: string) => void; onMethodChange: (value: string) => void;
     onStatusChange: (value: string) => void;
 }
 
@@ -31,10 +30,12 @@ function AnalyticsFilters({
                     </label>
 
                     <select
-                        value={minutes}
+                        value={minutes ?? 0}
                         onChange={(e) =>
                             onMinutesChange(
-                                Number(e.target.value)
+                                Number(e.target.value) === 0
+                                    ? null
+                                    : Number(e.target.value)
                             )
                         }
                         className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
@@ -57,6 +58,10 @@ function AnalyticsFilters({
 
                         <option value={1440}>
                             Last 24 hours
+                        </option>
+
+                        <option value={0}>
+                            All time
                         </option>
                     </select>
                 </div>
