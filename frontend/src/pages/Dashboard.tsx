@@ -531,6 +531,7 @@ function Dashboard() {
 
         if (
             latestEvent.type === "incident_created" ||
+            latestEvent.type === "incident_updated" ||
             latestEvent.type === "incident_resolved"
         ) {
             const timer = setTimeout(() => {

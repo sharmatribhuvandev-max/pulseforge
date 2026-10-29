@@ -2,6 +2,7 @@ import { Response } from "express";
 import { postgresPool } from "../db/postgres";
 import { Project } from "../models/Project";
 import { AuthRequest } from "../middleware/authMiddleware";
+import { Types } from "mongoose";
 
 export const getProjectIncidents = async (
     req: AuthRequest,
@@ -10,7 +11,11 @@ export const getProjectIncidents = async (
     try {
         const projectId = req.params.id;
 
-        if (!projectId || Array.isArray(projectId)) {
+        if (
+            !projectId ||
+            Array.isArray(projectId) ||
+            !Types.ObjectId.isValid(projectId)
+        ) {
             return res.status(400).json({
                 message: "Invalid project ID"
             });

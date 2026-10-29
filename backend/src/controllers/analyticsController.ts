@@ -1,4 +1,5 @@
 import { Response } from "express";
+import { Types } from "mongoose";
 import { Project } from "../models/Project";
 import { AuthRequest } from "../middleware/authMiddleware";
 
@@ -53,7 +54,7 @@ function getAnalyticsFilters(
             Number(minutesParam);
 
         if (
-            !Number.isNaN(parsedMinutes) &&
+            Number.isFinite(parsedMinutes) &&
             parsedMinutes > 0
         ) {
             filters.minutes =
@@ -129,7 +130,8 @@ export async function getAnalytics(
          */
         if (
             !projectId ||
-            Array.isArray(projectId)
+            Array.isArray(projectId) ||
+            !Types.ObjectId.isValid(projectId)
         ) {
 
             return res.status(400).json({
@@ -230,7 +232,8 @@ export async function getLatencyHistoryData(
          */
         if (
             !projectId ||
-            Array.isArray(projectId)
+            Array.isArray(projectId) ||
+            !Types.ObjectId.isValid(projectId)
         ) {
 
             return res.status(400).json({
@@ -327,7 +330,8 @@ export async function getEndpointAnalyticsData(
          */
         if (
             !projectId ||
-            Array.isArray(projectId)
+            Array.isArray(projectId) ||
+            !Types.ObjectId.isValid(projectId)
         ) {
 
             return res.status(400).json({
@@ -415,7 +419,11 @@ export async function getRecentApiEventsData(
     try {
         const projectId = req.params.projectId;
 
-        if (!projectId || Array.isArray(projectId)) {
+        if (
+            !projectId ||
+            Array.isArray(projectId) ||
+            !Types.ObjectId.isValid(projectId)
+        ) {
             return res.status(400).json({
                 message: "Invalid project ID",
             });

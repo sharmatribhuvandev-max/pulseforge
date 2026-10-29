@@ -16,6 +16,10 @@ vi.mock("../src/models/Project", () => ({
     },
 }));
 
+vi.mock("../src/services/websocketService", () => ({
+    authorizeProjectForUser: vi.fn(),
+}));
+
 import {
     createProject,
     getProjects,

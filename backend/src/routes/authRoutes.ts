@@ -1,15 +1,19 @@
 import { Router, Response } from "express";
 import { signup, signin } from "../controllers/authController";
+import { createWebSocketTicket } from "../controllers/webSocketTicketController";
 import {
     authMiddleware,
     AuthRequest
 } from "../middleware/authMiddleware";
+import { authRateLimit } from "../middleware/authRateLimit";
 
 const router = Router();
 
-router.post("/signup", signup);
+router.post("/signup", authRateLimit, signup);
 
-router.post("/signin", signin);
+router.post("/signin", authRateLimit, signin);
+
+router.post("/ws-ticket", authMiddleware, createWebSocketTicket);
 
 router.get(
     "/me",

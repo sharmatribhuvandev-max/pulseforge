@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const {
     axiosMock,
     isAxiosErrorMock,
+    requestOutboundMock,
     queryMock,
     broadcastMock,
     checkErrorRateMock,
@@ -12,6 +13,7 @@ const {
 } = vi.hoisted(() => ({
     axiosMock: vi.fn(),
     isAxiosErrorMock: vi.fn(),
+    requestOutboundMock: vi.fn(),
     queryMock: vi.fn(),
     broadcastMock: vi.fn(),
     checkErrorRateMock: vi.fn(),
@@ -23,6 +25,10 @@ vi.mock("axios", () => ({
     default: Object.assign(axiosMock, {
         isAxiosError: isAxiosErrorMock
     })
+}));
+
+vi.mock("../src/services/outboundRequest", () => ({
+    requestOutbound: requestOutboundMock
 }));
 
 vi.mock("../src/db/postgres", () => ({
@@ -54,10 +60,11 @@ describe("Monitor service", () => {
         checkErrorRateMock.mockResolvedValue(undefined);
         checkLatencyMock.mockResolvedValue(undefined);
         resolveErrorRateIncidentMock.mockResolvedValue(undefined);
+        isAxiosErrorMock.mockReturnValue(false);
     });
 
     it("records and broadcasts a successful API request", async () => {
-        axiosMock.mockResolvedValueOnce({ status: 200 });
+        requestOutboundMock.mockResolvedValueOnce({ status: 200 });
 
         const result = await monitorApi(
             "project-1",
@@ -65,11 +72,10 @@ describe("Monitor service", () => {
             "GET"
         );
 
-        expect(axiosMock).toHaveBeenCalledWith({
-            method: "GET",
-            url: "https://example.com/health",
-            timeout: 10000
-        });
+        expect(requestOutboundMock).toHaveBeenCalledWith(
+            "https://example.com/health",
+            "GET"
+        );
 
         expect(queryMock).toHaveBeenCalledOnce();
 
@@ -93,7 +99,8 @@ describe("Monitor service", () => {
         expect(resolveErrorRateIncidentMock).toHaveBeenCalledWith("project-1");
         expect(checkLatencyMock).toHaveBeenCalledWith(
             "project-1",
-            expect.any(Number)
+            result.latency,
+            true
         );
 
         expect(broadcastMock).toHaveBeenCalledWith(
@@ -109,7 +116,7 @@ describe("Monitor service", () => {
     });
 
     it("includes additional chaos latency in the recorded result", async () => {
-        axiosMock.mockResolvedValueOnce({ status: 200 });
+        requestOutboundMock.mockResolvedValueOnce({ status: 200 });
 
         const result = await monitorApi(
             "project-1",
@@ -121,13 +128,12 @@ describe("Monitor service", () => {
         expect(result.success).toBe(true);
         expect(result.latency).toBeGreaterThanOrEqual(500);
 
-        expect(queryMock.mock.calls[0][1][4]).toBe(
-            result.latency
-        );
+        expect(queryMock.mock.calls[0][1][4]).toBe(result.latency);
 
         expect(checkLatencyMock).toHaveBeenCalledWith(
             "project-1",
-            result.latency
+            result.latency,
+            true
         );
     });
 
@@ -137,7 +143,7 @@ describe("Monitor service", () => {
             code: undefined
         };
 
-        axiosMock.mockRejectedValueOnce(httpError);
+        requestOutboundMock.mockRejectedValueOnce(httpError);
         isAxiosErrorMock.mockReturnValue(true);
 
         const result = await monitorApi(
@@ -154,6 +160,12 @@ describe("Monitor service", () => {
 
         expect(checkErrorRateMock).toHaveBeenCalledWith("project-1");
 
+        expect(checkLatencyMock).toHaveBeenCalledWith(
+            "project-1",
+            result.latency,
+            false
+        );
+
         expect(broadcastMock).toHaveBeenCalledWith(
             expect.objectContaining({
                 type: "api_request",
@@ -164,9 +176,44 @@ describe("Monitor service", () => {
         );
     });
 
+    it("records a resolved HTTP 500 response as a failed request", async () => {
+        requestOutboundMock.mockResolvedValueOnce({ status: 500 });
+
+        const result = await monitorApi(
+            "project-1",
+            "https://example.com/health",
+            "GET"
+        );
+
+        expect(result.success).toBe(false);
+        expect(result.statusCode).toBe(500);
+
+        const [, values] = queryMock.mock.calls[0];
+
+        expect(values[3]).toBe(500);
+        expect(values[5]).toBe(true);
+
+        expect(checkErrorRateMock).toHaveBeenCalledWith("project-1");
+        expect(checkLatencyMock).toHaveBeenCalledWith(
+            "project-1",
+            result.latency,
+            false
+        );
+
+        expect(broadcastMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: "api_request",
+                statusCode: 500,
+                success: false,
+                errorType: "HTTP_ERROR"
+            })
+        );
+    });
+
     it("records network failures as status 502", async () => {
-        axiosMock.mockRejectedValueOnce(new Error("Network unavailable"));
-        isAxiosErrorMock.mockReturnValue(false);
+        requestOutboundMock.mockRejectedValueOnce(
+            new Error("Network unavailable")
+        );
 
         const result = await monitorApi(
             "project-1",
@@ -179,6 +226,13 @@ describe("Monitor service", () => {
         expect(queryMock.mock.calls[0][1][3]).toBe(502);
         expect(queryMock.mock.calls[0][1][5]).toBe(true);
 
+        expect(checkErrorRateMock).toHaveBeenCalledWith("project-1");
+        expect(checkLatencyMock).toHaveBeenCalledWith(
+            "project-1",
+            result.latency,
+            false
+        );
+
         expect(broadcastMock).toHaveBeenCalledWith(
             expect.objectContaining({
                 statusCode: 502,
@@ -189,7 +243,7 @@ describe("Monitor service", () => {
     });
 
     it("records request timeouts as status 504", async () => {
-        axiosMock.mockRejectedValueOnce({
+        requestOutboundMock.mockRejectedValueOnce({
             code: "ECONNABORTED"
         });
         isAxiosErrorMock.mockReturnValue(true);
@@ -204,8 +258,15 @@ describe("Monitor service", () => {
         expect(result.statusCode).toBe(504);
         expect(queryMock.mock.calls[0][1][3]).toBe(504);
 
+        expect(checkLatencyMock).toHaveBeenCalledWith(
+            "project-1",
+            result.latency,
+            false
+        );
+
         expect(broadcastMock).toHaveBeenCalledWith(
             expect.objectContaining({
+                type: "api_request",
                 statusCode: 504,
                 success: false,
                 errorType: "TIMEOUT"
@@ -213,22 +274,100 @@ describe("Monitor service", () => {
         );
     });
 
-    it("checks latency for failed requests too", async () => {
-        axiosMock.mockRejectedValueOnce(new Error("Network unavailable"));
-        isAxiosErrorMock.mockReturnValue(false);
+    it("does not count failed requests toward latency recovery", async () => {
+        requestOutboundMock.mockRejectedValueOnce(
+            new Error("Network unavailable")
+        );
 
-        await monitorApi(
+        const result = await monitorApi(
             "project-1",
             "https://unreachable.example",
             "POST",
             250
         );
 
+        expect(checkLatencyMock).toHaveBeenCalledOnce();
         expect(checkLatencyMock).toHaveBeenCalledWith(
             "project-1",
-            expect.any(Number)
+            result.latency,
+            false
         );
 
         expect(queryMock.mock.calls[0][1][4]).toBeGreaterThanOrEqual(250);
+    });
+
+    it("records an outbound security rejection as a failed request", async () => {
+        requestOutboundMock.mockRejectedValueOnce(
+            new Error("Outbound destination is not a public IP address")
+        );
+
+        const result = await monitorApi(
+            "project-1",
+            "http://127.0.0.1/health",
+            "GET"
+        );
+
+        expect(requestOutboundMock).toHaveBeenCalledWith(
+            "http://127.0.0.1/health",
+            "GET"
+        );
+
+        expect(result.success).toBe(false);
+        expect(result.statusCode).toBe(502);
+        expect(queryMock.mock.calls[0][1][5]).toBe(true);
+
+        expect(checkLatencyMock).toHaveBeenCalledWith(
+            "project-1",
+            result.latency,
+            false
+        );
+
+        expect(broadcastMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: "api_request",
+                success: false,
+                statusCode: 502,
+                errorType: "NETWORK_ERROR"
+            })
+        );
+    });
+
+    it("does not record a false failure when incident checks fail after a healthy request", async () => {
+        requestOutboundMock.mockResolvedValueOnce({ status: 200 });
+        checkLatencyMock.mockRejectedValueOnce(
+            new Error("Incident check unavailable")
+        );
+
+        await expect(
+            monitorApi("project-1", "https://example.com/health", "GET")
+        ).rejects.toThrow("Incident check unavailable");
+
+        // Only the healthy request is stored; no second failed row.
+        expect(queryMock).toHaveBeenCalledOnce();
+        expect(queryMock.mock.calls[0][1][3]).toBe(200);
+        expect(queryMock.mock.calls[0][1][5]).toBe(false);
+
+        expect(checkErrorRateMock).not.toHaveBeenCalled();
+        expect(checkLatencyMock).toHaveBeenCalledOnce();
+        expect(checkLatencyMock).toHaveBeenCalledWith(
+            "project-1",
+            expect.any(Number),
+            true
+        );
+        expect(broadcastMock).not.toHaveBeenCalled();
+    });
+
+    it("does not treat a database failure after a healthy request as an outbound failure", async () => {
+        requestOutboundMock.mockResolvedValueOnce({ status: 200 });
+        queryMock.mockRejectedValueOnce(new Error("Database unavailable"));
+
+        await expect(
+            monitorApi("project-1", "https://example.com/health", "GET")
+        ).rejects.toThrow("Database unavailable");
+
+        expect(queryMock).toHaveBeenCalledOnce();
+        expect(checkErrorRateMock).not.toHaveBeenCalled();
+        expect(checkLatencyMock).not.toHaveBeenCalled();
+        expect(broadcastMock).not.toHaveBeenCalled();
     });
 });

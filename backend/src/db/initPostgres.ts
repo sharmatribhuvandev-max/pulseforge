@@ -1,3 +1,4 @@
+
 import { postgresPool } from "./postgres";
 
 export async function initPostgres() {
@@ -26,6 +27,12 @@ export async function initPostgres() {
             started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             resolved_at TIMESTAMP
         );
+    `);
+
+    // Add the recovery counter to existing databases without losing incidents.
+    await postgresPool.query(`
+        ALTER TABLE incidents
+        ADD COLUMN IF NOT EXISTS healthy_checks INTEGER NOT NULL DEFAULT 0;
     `);
 
     console.log("PostgreSQL tables initialized");

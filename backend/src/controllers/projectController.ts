@@ -1,6 +1,7 @@
 import { Response } from "express";
 
 import { Project } from "../models/Project";
+import { authorizeProjectForUser } from "../services/websocketService";
 import { AuthRequest } from "../middleware/authMiddleware";
 
 import { Types } from "mongoose";
@@ -130,6 +131,10 @@ export async function createProject(
             await Project.create(
                 projectData
             );
+
+        // Open dashboards of this user can now receive live events
+        // for the new project without reconnecting.
+        authorizeProjectForUser(req.userId, String(project._id));
 
 
         /*

@@ -1,3 +1,4 @@
+
 import { Response } from "express";
 import mongoose from "mongoose";
 
@@ -23,27 +24,15 @@ import {
 
 import { AuthRequest } from "../middleware/authMiddleware";
 
-
 export const checkApi = async (
     req: AuthRequest,
     res: Response
 ) => {
-
     try {
-
-        /*
-         * ==========================================
-         * START REQUEST TIMER
-         * ==========================================
-         */
-
         const requestStart = Date.now();
 
-
         /*
-         * ==========================================
          * VALIDATE ENDPOINT ID
-         * ==========================================
          */
 
         const endpointId = req.params.id;
@@ -58,11 +47,8 @@ export const checkApi = async (
             });
         }
 
-
         /*
-         * ==========================================
          * AUTH CHECK
-         * ==========================================
          */
 
         if (!req.userId) {
@@ -71,15 +57,11 @@ export const checkApi = async (
             });
         }
 
-
         /*
-         * ==========================================
          * FIND ENDPOINT
-         * ==========================================
          */
 
-        const endpoint =
-            await Endpoint.findById(endpointId);
+        const endpoint = await Endpoint.findById(endpointId);
 
         if (!endpoint) {
             return res.status(404).json({
@@ -87,18 +69,14 @@ export const checkApi = async (
             });
         }
 
-
         /*
-         * ==========================================
          * VERIFY PROJECT OWNERSHIP
-         * ==========================================
          */
 
-        const project =
-            await Project.findOne({
-                _id: endpoint.projectId,
-                userId: req.userId
-            });
+        const project = await Project.findOne({
+            _id: endpoint.projectId,
+            userId: req.userId
+        });
 
         if (!project) {
             return res.status(404).json({
@@ -106,54 +84,36 @@ export const checkApi = async (
             });
         }
 
+        const projectId = project._id.toString();
 
         /*
-         * ==========================================
          * FIND ACTIVE CHAOS RULE
-         * ==========================================
          */
 
-        const chaosRule =
-            await getActiveChaosRule(
-                endpoint._id.toString()
-            );
-
+        const chaosRule = await getActiveChaosRule(
+            endpoint._id.toString()
+        );
 
         /*
-         * ==========================================
          * APPLY CHAOS
-         * ==========================================
          */
 
         if (chaosRule) {
-
-            /*
-             * Artificial latency
-             */
             if (chaosRule.latency > 0) {
-
-                await applyLatency(
-                    chaosRule.latency
-                );
+                await applyLatency(chaosRule.latency);
             }
 
-
             /*
-             * Error injection
+             * ERROR INJECTION
              */
-            if (
-                shouldInjectError(
-                    chaosRule.errorRate
-                )
-            ) {
 
-                const totalLatency =
-                    Date.now() - requestStart;
-
+            if (shouldInjectError(chaosRule.errorRate)) {
+                const totalLatency = Date.now() - requestStart;
 
                 /*
-                 * Save failed request
+                 * SAVE FAILED REQUEST
                  */
+
                 await postgresPool.query(
                     `
                     INSERT INTO api_requests
@@ -168,7 +128,7 @@ export const checkApi = async (
                     VALUES ($1, $2, $3, $4, $5, $6)
                     `,
                     [
-                        project._id.toString(),
+                        projectId,
                         endpoint.url,
                         endpoint.method,
                         chaosRule.statusCode,
@@ -177,141 +137,89 @@ export const checkApi = async (
                     ]
                 );
 
+                /*
+                 * INCIDENT CHECKS
+                 *
+                 * Failed chaos requests must not count
+                 * toward consecutive healthy latency checks.
+                 */
+
+                await checkErrorRate(projectId);
+                await checkLatency(projectId, totalLatency, false);
 
                 /*
-                 * Check incidents
+                 * BROADCAST CHAOS EVENT
                  */
-                await checkErrorRate(
-                    project._id.toString()
-                );
 
-                await checkLatency(
-                    project._id.toString(),
-                    totalLatency
-                );
-
-
-                /*
-                 * Broadcast chaos event
-                 */
                 broadcast({
                     type: "chaos_event",
-                    projectId:
-                        project._id.toString(),
-                    endpointId:
-                        endpoint._id.toString(),
-                    endpoint:
-                        endpoint.url,
-                    method:
-                        endpoint.method,
-                    statusCode:
-                        chaosRule.statusCode,
-                    latency:
-                        totalLatency,
+                    projectId,
+                    endpointId: endpoint._id.toString(),
+                    endpoint: endpoint.url,
+                    method: endpoint.method,
+                    statusCode: chaosRule.statusCode,
+                    latency: totalLatency,
                     success: false,
                     chaos: true
                 });
 
-
                 /*
-                 * Return chaos response
+                 * RETURN CHAOS RESPONSE
                  */
+
                 return res
                     .status(chaosRule.statusCode)
                     .json({
-                        message:
-                            "Chaos error injected",
-
+                        message: "Chaos error injected",
                         chaos: true,
-
-                        statusCode:
-                            chaosRule.statusCode,
-
-                        latency:
-                            totalLatency
+                        statusCode: chaosRule.statusCode,
+                        latency: totalLatency
                     });
             }
         }
 
-
         /*
-         * ==========================================
          * MONITOR REAL API
-         * ==========================================
+         *
+         * monitorApi records the outbound request and performs
+         * the incident checks. Do not repeat those checks here.
          */
 
-        const chaosLatency =
-            chaosRule?.latency || 0;
+        const chaosLatency = chaosRule?.latency || 0;
 
-
-        const monitorResult =
-            await monitorApi(
-                project._id.toString(),
-                endpoint.url,
-                endpoint.method,
-                chaosLatency
-            );
-
-
-        /*
-         * ==========================================
-         * TOTAL LATENCY
-         * ==========================================
-         */
-
-        const totalLatency =
-            Date.now() - requestStart;
-
-
-        /*
-         * ==========================================
-         * CHECK INCIDENT STATE
-         * ==========================================
-         */
-
-        await checkErrorRate(
-            project._id.toString()
+        const monitorResult = await monitorApi(
+            projectId,
+            endpoint.url,
+            endpoint.method,
+            chaosLatency
         );
 
-        await checkLatency(
-            project._id.toString(),
-            totalLatency
-        );
-
-
         /*
-         * ==========================================
          * RETURN RESULT
-         * ==========================================
+         *
+         * Use the measured outbound latency from monitorApi.
+         * Controller/database overhead is not endpoint latency.
          */
 
         return res.status(200).json({
-
-            message:
-                "API checked successfully",
-
-            result: {
-
-                ...monitorResult,
-
-                latency:
-                    totalLatency
-            }
+            message: "API checked successfully",
+            result: monitorResult
         });
 
-    } catch (error) {
-
-        console.error(
-            "Check API error:",
-            error
-        );
+    } catch (error: unknown) {
+        if (error instanceof Error) {
+            console.error("Check API error:", {
+                name: error.name,
+                message: error.message,
+                stack: error.stack
+            });
+        } else {
+            console.error("Check API error: Unknown thrown value", error);
+        }
 
         return res.status(500).json({
-            message:
-                "Failed to check API",
-
-            error:
-                "INTERNAL_SERVER_ERROR"
+            message: "Failed to check API",
+            error: "INTERNAL_SERVER_ERROR"
         });
     }
 };

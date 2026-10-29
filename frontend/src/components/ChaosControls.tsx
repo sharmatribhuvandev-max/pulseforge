@@ -339,7 +339,21 @@ function ChaosControls({
     const recoveryPassed =
         recoveryComplete &&
         recoveryChecks.length === 3 &&
-        recoveryChecks.every((check) => check.success);
+        recoveryChecks.every(
+            (check) =>
+                check.success &&
+                check.statusCode !== null &&
+                check.statusCode >= 200 &&
+                check.statusCode < 300
+        );
+
+    const latencyRecoveryPassed =
+        recoveryPassed &&
+        recoveryChecks.every(
+            (check) =>
+                check.latency !== null &&
+                check.latency < 1000
+        );
 
     return (
         <div className="mt-4 rounded-lg border border-amber-500/20 bg-slate-950/50 p-4">
@@ -355,8 +369,8 @@ function ChaosControls({
 
                 <span
                     className={`rounded-full px-2.5 py-1 text-xs font-medium ${rule?.enabled
-                            ? "bg-amber-500/10 text-amber-400"
-                            : "bg-slate-700/60 text-slate-400"
+                        ? "bg-amber-500/10 text-amber-400"
+                        : "bg-slate-700/60 text-slate-400"
                         }`}
                 >
                     {loading
@@ -461,8 +475,8 @@ function ChaosControls({
                     onClick={() => void handleToggle()}
                     disabled={loading || saving || verifying}
                     className={`rounded-lg px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 ${rule?.enabled
-                            ? "bg-red-600 hover:bg-red-500"
-                            : "bg-amber-600 hover:bg-amber-500"
+                        ? "bg-red-600 hover:bg-red-500"
+                        : "bg-amber-600 hover:bg-amber-500"
                         }`}
                 >
                     {saving
@@ -482,6 +496,7 @@ function ChaosControls({
                 </button>
             </div>
 
+
             {recoveryComplete && (
                 <div className="mt-4 rounded-lg border border-slate-700 bg-slate-900/70 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -489,13 +504,13 @@ function ChaosControls({
                             Recovery Verification
                         </h6>
                         <span
-                            className={`rounded-full px-2 py-1 text-xs font-medium ${recoveryPassed
+                            className={`rounded-full px-2 py-1 text-xs font-medium ${recoveryPassed && latencyRecoveryPassed
                                     ? "bg-emerald-500/10 text-emerald-400"
                                     : "bg-amber-500/10 text-amber-400"
                                 }`}
                         >
-                            {recoveryPassed
-                                ? "All checks passed"
+                            {recoveryPassed && latencyRecoveryPassed
+                                ? "Request and latency recovery passed"
                                 : "Recovery needs attention"}
                         </span>
                     </div>
@@ -503,10 +518,18 @@ function ChaosControls({
                     <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
                         <div>
                             <p className="text-xs text-slate-400">
-                                Successful checks
+                                Successful HTTP checks
                             </p>
                             <p className="mt-1 text-lg font-semibold text-emerald-400">
-                                {recoveryChecks.filter((item) => item.success).length}/3
+                                {
+                                    recoveryChecks.filter(
+                                        (check) =>
+                                            check.success &&
+                                            check.statusCode !== null &&
+                                            check.statusCode >= 200 &&
+                                            check.statusCode < 300
+                                    ).length
+                                }/3
                             </p>
                         </div>
 
@@ -515,7 +538,15 @@ function ChaosControls({
                                 Failed checks
                             </p>
                             <p className="mt-1 text-lg font-semibold text-red-400">
-                                {recoveryChecks.filter((item) => !item.success).length}
+                                {
+                                    recoveryChecks.filter(
+                                        (check) =>
+                                            !check.success ||
+                                            check.statusCode === null ||
+                                            check.statusCode < 200 ||
+                                            check.statusCode >= 300
+                                    ).length
+                                }
                             </p>
                         </div>
 
@@ -531,41 +562,98 @@ function ChaosControls({
                         </div>
                     </div>
 
-                    <div className="mt-4 space-y-2">
-                        {recoveryChecks.map((check) => (
-                            <div
-                                key={check.attempt}
-                                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-800 px-3 py-2"
-                            >
-                                <span className="text-sm text-slate-300">
-                                    Check {check.attempt}
-                                </span>
+                    <div className="mt-4 rounded-md border border-slate-800 p-3">
+                        <p className="text-sm font-medium text-slate-200">
+                            Request recovery
+                        </p>
+                        <p
+                            className={`mt-1 text-sm ${recoveryPassed
+                                    ? "text-emerald-400"
+                                    : "text-amber-400"
+                                }`}
+                        >
+                            {recoveryPassed
+                                ? "All three requests returned successful HTTP 2xx responses."
+                                : "One or more checks failed or did not return a successful HTTP 2xx response."}
+                        </p>
 
-                                <span
-                                    className={`text-xs ${check.success
-                                            ? "text-emerald-400"
-                                            : "text-red-400"
-                                        }`}
+                        <p className="mt-3 text-sm font-medium text-slate-200">
+                            Latency recovery
+                        </p>
+                        <p
+                            className={`mt-1 text-sm ${latencyRecoveryPassed
+                                    ? "text-emerald-400"
+                                    : "text-amber-400"
+                                }`}
+                        >
+                            {latencyRecoveryPassed
+                                ? "All three requests were below the 1000 ms latency threshold."
+                                : "Not recovered: all three requests must be below 1000 ms."}
+                        </p>
+                    </div>
+
+                    <div className="mt-4 space-y-2">
+                        {recoveryChecks.map((check) => {
+                            const httpSucceeded =
+                                check.success &&
+                                check.statusCode !== null &&
+                                check.statusCode >= 200 &&
+                                check.statusCode < 300;
+
+                            const latencyHealthy =
+                                check.latency !== null &&
+                                check.latency < 1000;
+
+                            return (
+                                <div
+                                    key={check.attempt}
+                                    className="rounded-md border border-slate-800 px-3 py-2"
                                 >
-                                    {check.message}
-                                    {check.statusCode !== null
-                                        ? ` · HTTP ${check.statusCode}`
-                                        : ""}
-                                    {check.latency !== null
-                                        ? ` · ${check.latency} ms`
-                                        : ""}
-                                </span>
-                            </div>
-                        ))}
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <span className="text-sm text-slate-300">
+                                            Check {check.attempt}
+                                        </span>
+                                        <span
+                                            className={`text-xs ${httpSucceeded
+                                                    ? "text-emerald-400"
+                                                    : "text-red-400"
+                                                }`}
+                                        >
+                                            {check.message}
+                                            {check.statusCode !== null
+                                                ? ` · HTTP ${check.statusCode}`
+                                                : ""}
+                                            {check.latency !== null
+                                                ? ` · ${check.latency} ms`
+                                                : ""}
+                                        </span>
+                                    </div>
+
+                                    <p
+                                        className={`mt-1 text-xs ${latencyHealthy
+                                                ? "text-emerald-400"
+                                                : "text-amber-400"
+                                            }`}
+                                    >
+                                        {check.latency === null
+                                            ? "Latency unavailable"
+                                            : latencyHealthy
+                                                ? "Latency within threshold"
+                                                : "Latency above threshold (1000 ms)"}
+                                    </p>
+                                </div>
+                            );
+                        })}
                     </div>
 
                     <p className="mt-3 text-xs text-slate-500">
-                        This checks request outcomes only. Review the dashboard's
-                        Active Incidents panel separately to confirm incident
-                        resolution.
+                        This panel verifies request outcomes and latency.
+                        Incident resolution is handled by the backend and
+                        should be confirmed in the dashboard's Active Incidents panel.
                     </p>
                 </div>
             )}
+
         </div>
     );
 }

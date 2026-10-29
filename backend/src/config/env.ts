@@ -38,24 +38,38 @@ const mongoUri = requiredString("MONGO_URI");
 const jwtSecret = requiredString("JWT_SECRET");
 const postgresPassword = requiredString("POSTGRES_PASSWORD");
 
-const frontendUrl =
+const rawFrontendUrl =
     process.env.FRONTEND_URL?.trim() || "http://localhost:5173";
 
-try {
-    const parsedUrl = new URL(frontendUrl);
+// Browsers send the Origin header as scheme://host[:port] with no path or
+// trailing slash. Store exactly that form so CORS and the WebSocket origin
+// check, which compare strings, match the real browser origin.
+function parseFrontendOrigin(value: string): string {
+    try {
+        const parsedUrl = new URL(value);
 
-    if (
-        !["http:", "https:"].includes(parsedUrl.protocol) ||
-        parsedUrl.username ||
-        parsedUrl.password
-    ) {
-        throw new Error();
+        if (
+            !["http:", "https:"].includes(parsedUrl.protocol) ||
+            parsedUrl.username ||
+            parsedUrl.password ||
+            parsedUrl.pathname !== "/" ||
+            parsedUrl.search ||
+            parsedUrl.hash
+        ) {
+            throw new Error();
+        }
+
+        return parsedUrl.origin;
+    } catch {
+        throw new Error(
+            "FRONTEND_URL must be a valid HTTP or HTTPS origin " +
+                "(for example https://app.example.com) with no path, " +
+                "query string, or credentials",
+        );
     }
-} catch {
-    throw new Error(
-        "FRONTEND_URL must be a valid HTTP or HTTPS URL",
-    );
 }
+
+const frontendUrl = parseFrontendOrigin(rawFrontendUrl);
 
 export const env = {
     port: positiveInteger("PORT", 3000),

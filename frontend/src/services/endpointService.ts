@@ -93,3 +93,24 @@ export const checkEndpoint = async (
 
     return response.data;
 };
+
+export const getCheckErrorMessage = (error: unknown): string => {
+    if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        const data = error.response?.data as
+            | { message?: unknown; error?: unknown; chaos?: unknown }
+            | undefined;
+
+        if (data && typeof data.message === "string") {
+            const code =
+                typeof data.error === "string" ? ` (${data.error})` : "";
+            const chaos = data.chaos === true ? " [chaos]" : "";
+
+            return `HTTP ${status ?? "?"}: ${data.message}${code}${chaos}`;
+        }
+
+        return error.message;
+    }
+
+    return error instanceof Error ? error.message : "request failed.";
+};

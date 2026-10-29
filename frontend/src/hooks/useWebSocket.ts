@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import axios from "axios";
 import { API_URL } from "../config";
 
 export interface Incident {
@@ -31,6 +32,12 @@ export interface WebSocketEvent {
 }
 
 const MAX_EVENTS = 100;
+const RECONNECT_DELAY_MS = 3000;
+
+interface WebSocketTicketResponse {
+    ticket: string;
+    expiresIn: number;
+}
 
 export const useWebSocket = () => {
     const [events, setEvents] = useState<WebSocketEvent[]>([]);
@@ -40,76 +47,132 @@ export const useWebSocket = () => {
         let socket: WebSocket | null = null;
         let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
         let stopped = false;
+        let connecting = false;
 
-        const connect = () => {
-            if (stopped) return;
+        const scheduleReconnect = () => {
+            if (stopped || reconnectTimer) return;
 
-            console.log("Connecting to WebSocket...");
-
-            socket = new WebSocket(API_URL.replace(/^http/, "ws"));
-
-            socket.onopen = () => {
-                console.log("WebSocket connected");
-                setConnected(true);
-            };
-
-            socket.onmessage = (message) => {
-                try {
-                    const data: WebSocketEvent = JSON.parse(message.data);
-
-                    console.log("WebSocket event received:", data);
-
-                    const isSupportedEvent = [
-                        "api_request",
-                        "chaos_event",
-                        "incident_created",
-                        "incident_resolved",
-                    ].includes(data.type);
-
-                    if (!isSupportedEvent) return;
-
-                    const event: WebSocketEvent = {
-                        ...data,
-                        eventId:
-                            data.eventId ??
-                            `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-                        timestamp: data.timestamp ?? new Date().toISOString(),
-                    };
-
-                    setEvents((previousEvents) =>
-                        [event, ...previousEvents].slice(0, MAX_EVENTS)
-                    );
-                } catch (error) {
-                    console.error("WebSocket message error:", error);
-                }
-            };
-
-            socket.onclose = () => {
-                console.log("WebSocket disconnected");
-                setConnected(false);
-
-                if (!stopped) {
-                    reconnectTimer = setTimeout(connect, 3000);
-                }
-            };
-
-            socket.onerror = (error) => {
-                console.error("WebSocket error:", error);
-                setConnected(false);
-            };
+            reconnectTimer = setTimeout(() => {
+                reconnectTimer = null;
+                void connect();
+            }, RECONNECT_DELAY_MS);
         };
 
-        connect();
+        const connect = async () => {
+            if (stopped || connecting) return;
+
+            connecting = true;
+
+            try {
+                const token = localStorage.getItem("token");
+
+                if (!token) {
+                    setConnected(false);
+                    return;
+                }
+
+                const response = await axios.post<WebSocketTicketResponse>(
+                    `${API_URL}/auth/ws-ticket`,
+                    {},
+                    {
+                        headers: {
+                            Authorization: `Bearer ${token}`,
+                        },
+                    }
+                );
+
+                if (stopped) return;
+
+                const ticket = response.data.ticket;
+
+                if (!ticket || !/^[a-f0-9]{64}$/.test(ticket)) {
+                    throw new Error("Invalid WebSocket ticket response");
+                }
+
+                const socketUrl = new URL(
+                    API_URL.replace(/^http/, "ws")
+                );
+                socketUrl.searchParams.set("ticket", ticket);
+
+                socket = new WebSocket(socketUrl.toString());
+
+                const currentSocket = socket;
+
+                currentSocket.onopen = () => {
+                    if (stopped || socket !== currentSocket) return;
+
+                    setConnected(true);
+                };
+
+                currentSocket.onmessage = (message) => {
+                    if (stopped || socket !== currentSocket) return;
+
+                    try {
+                        const data: WebSocketEvent = JSON.parse(message.data);
+
+                        const isSupportedEvent = [
+                            "api_request",
+                            "chaos_event",
+                            "incident_created",
+                            "incident_updated",
+                            "incident_resolved",
+                        ].includes(data.type);
+
+                        if (!isSupportedEvent) return;
+
+                        const event: WebSocketEvent = {
+                            ...data,
+                            eventId:
+                                data.eventId ??
+                                `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                            timestamp: data.timestamp ?? new Date().toISOString(),
+                        };
+
+                        setEvents((previousEvents) =>
+                            [event, ...previousEvents].slice(0, MAX_EVENTS)
+                        );
+                    } catch {
+                        // Ignore malformed WebSocket messages.
+                    }
+                };
+
+                currentSocket.onclose = () => {
+                    if (socket !== currentSocket) return;
+
+                    setConnected(false);
+                    scheduleReconnect();
+                };
+
+                currentSocket.onerror = () => {
+                    if (socket === currentSocket) {
+                        setConnected(false);
+                    }
+                };
+            } catch {
+                setConnected(false);
+                scheduleReconnect();
+            } finally {
+                connecting = false;
+            }
+        };
+
+        void connect();
 
         return () => {
             stopped = true;
 
             if (reconnectTimer) {
                 clearTimeout(reconnectTimer);
+                reconnectTimer = null;
             }
 
             if (socket) {
+                socket.onopen = null;
+                socket.onmessage = null;
+                socket.onerror = null;
+                socket.onclose = null;
                 socket.close();
+                socket = null;
             }
         };
     }, []);

@@ -7,6 +7,7 @@ import {
     createEndpoint,
     deleteEndpoint,
     checkEndpoint,
+    getCheckErrorMessage,
 } from "../services/endpointService";
 import ChaosControls from "./ChaosControls";
 
@@ -124,7 +125,7 @@ function ProjectCard({
     ) => {
         const confirmed = window.confirm(
             `Are you sure you want to delete "${endpointName}"? ` +
-                "This removes the endpoint configuration, but does not delete saved API request history."
+            "This removes the endpoint configuration, but does not delete saved API request history."
         );
 
         if (!confirmed) {
@@ -193,12 +194,12 @@ function ProjectCard({
             if (result.success === true) {
                 setTestResult(
                     `✓ ${endpointName} succeeded` +
-                        (details ? ` — ${details}` : "")
+                    (details ? ` — ${details}` : "")
                 );
             } else if (result.success === false) {
                 setError(
                     `✗ ${endpointName} failed` +
-                        (details ? ` — ${details}` : "")
+                    (details ? ` — ${details}` : "")
                 );
             } else {
                 setError(
@@ -210,11 +211,7 @@ function ProjectCard({
         } catch (err) {
             console.error("Endpoint test failed:", err);
 
-            setError(
-                err instanceof Error
-                    ? `${endpointName}: ${err.message}`
-                    : `${endpointName}: request failed.`
-            );
+            setError(`${endpointName}: ${getCheckErrorMessage(err)}`);
         } finally {
             setTestingEndpointId(null);
         }
