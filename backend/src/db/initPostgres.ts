@@ -1,4 +1,3 @@
-
 import { postgresPool } from "./postgres";
 
 export async function initPostgres() {
@@ -34,6 +33,11 @@ export async function initPostgres() {
         ALTER TABLE incidents
         ADD COLUMN IF NOT EXISTS healthy_checks INTEGER NOT NULL DEFAULT 0;
     `);
-
+    // Ensure only one active incident exists per project and incident type.
+    await postgresPool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_incidents_one_active_per_project_type
+        ON incidents (project_id, type)
+        WHERE resolved_at IS NULL;
+    `);
     console.log("PostgreSQL tables initialized");
 }

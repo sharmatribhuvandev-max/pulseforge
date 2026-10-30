@@ -87,6 +87,24 @@ describe("Incident service", () => {
             expect(broadcastMock).not.toHaveBeenCalled();
         });
 
+        it("does not broadcast when concurrent error-rate incident creation conflicts", async () => {
+            queryMock
+                .mockResolvedValueOnce({
+                    rows: [{ total: 20, failed: 12 }]
+                })
+                .mockResolvedValueOnce({ rows: [] })
+                .mockResolvedValueOnce({ rows: [] });
+
+            await checkErrorRate("project-1");
+
+            expect(queryMock).toHaveBeenCalledTimes(3);
+            expect(queryMock.mock.calls[2][0]).toContain(
+                "ON CONFLICT (project_id, type)"
+            );
+            expect(queryMock.mock.calls[2][0]).toContain("DO NOTHING");
+            expect(broadcastMock).not.toHaveBeenCalled();
+        });
+
         it("resolves an active incident when error rate falls below 50%", async () => {
             queryMock
                 .mockResolvedValueOnce({
@@ -144,6 +162,21 @@ describe("Incident service", () => {
                     type: "HIGH_LATENCY"
                 }
             });
+        });
+
+        it("does not broadcast when concurrent latency incident creation conflicts", async () => {
+            queryMock
+                .mockResolvedValueOnce({ rows: [] })
+                .mockResolvedValueOnce({ rows: [] });
+
+            await checkLatency("project-1", 1200, true);
+
+            expect(queryMock).toHaveBeenCalledTimes(2);
+            expect(queryMock.mock.calls[1][0]).toContain(
+                "ON CONFLICT (project_id, type)"
+            );
+            expect(queryMock.mock.calls[1][0]).toContain("DO NOTHING");
+            expect(broadcastMock).not.toHaveBeenCalled();
         });
 
         it("updates an existing active latency incident without creating a duplicate", async () => {

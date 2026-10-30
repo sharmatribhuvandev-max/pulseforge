@@ -75,6 +75,9 @@ export async function checkErrorRate(projectId: string) {
                     actual_value
                 )
                 VALUES ($1, $2, $3, $4)
+                ON CONFLICT (project_id, type)
+                WHERE resolved_at IS NULL
+                DO NOTHING
                 RETURNING *
                 `,
                 [
@@ -84,6 +87,10 @@ export async function checkErrorRate(projectId: string) {
                     errorRate
                 ]
             );
+
+            if (incident.rows.length === 0) {
+                return;
+            }
 
             broadcast({
                 type: "incident_created",
@@ -156,19 +163,10 @@ export async function checkLatency(
                 actual_value,
                 healthy_checks
             )
-            SELECT
-                $1::VARCHAR(100),
-                $2::VARCHAR(100),
-                $3::NUMERIC,
-                $4::NUMERIC,
-                0
-            WHERE NOT EXISTS (
-                SELECT 1
-                FROM incidents
-                WHERE project_id = $1::VARCHAR(100)
-                  AND type = 'HIGH_LATENCY'
-                  AND resolved_at IS NULL
-            )
+            VALUES ($1, $2, $3, $4, 0)
+            ON CONFLICT (project_id, type)
+            WHERE resolved_at IS NULL
+            DO NOTHING
             RETURNING *
             `,
             [
