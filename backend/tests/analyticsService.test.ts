@@ -179,6 +179,7 @@ describe("Analytics service", () => {
         });
     });
 
+    
     describe("getLatencyHistory", () => {
         it("converts latency and status values to numbers", async () => {
             queryMock.mockResolvedValueOnce({
@@ -198,14 +199,50 @@ describe("Analytics service", () => {
                 statusCode: 200,
                 error: false
             }]);
+        });
+
+        it("selects the latest 100 records and returns them chronologically", async () => {
+            queryMock.mockResolvedValueOnce({
+                rows: [
+                    {
+                        created_at: new Date("2026-01-03T10:00:00.000Z"),
+                        latency_ms: "300",
+                        status_code: "200",
+                        error: false
+                    },
+                    {
+                        created_at: new Date("2026-01-02T10:00:00.000Z"),
+                        latency_ms: "200",
+                        status_code: "200",
+                        error: false
+                    },
+                    {
+                        created_at: new Date("2026-01-01T10:00:00.000Z"),
+                        latency_ms: "100",
+                        status_code: "200",
+                        error: false
+                    }
+                ]
+            });
+
+            const result = await getLatencyHistory("project-1");
 
             const [sql, values] = queryMock.mock.calls[0];
 
-            expect(sql).toContain("ORDER BY created_at ASC");
+            expect(sql).toContain(
+                "ORDER BY created_at DESC, id DESC"
+            );
             expect(sql).toContain("LIMIT 100");
             expect(values).toEqual(["project-1"]);
+
+            expect(result.map((point) => point.latency)).toEqual([
+                100,
+                200,
+                300
+            ]);
         });
     });
+
 
     describe("getRecentApiEvents", () => {
         it("maps persisted requests into dashboard event objects", async () => {

@@ -222,13 +222,13 @@ export async function getLatencyHistory(
             error
         FROM api_requests
         WHERE ${whereClause}
-        ORDER BY created_at ASC
+        ORDER BY created_at DESC, id DESC
         LIMIT 100
         `,
         values
     );
 
-    return result.rows.map((row) => ({
+    return result.rows.reverse().map((row) => ({
         timestamp: row.created_at,
         latency: Number(row.latency_ms),
         statusCode: Number(row.status_code),
