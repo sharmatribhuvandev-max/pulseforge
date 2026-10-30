@@ -72,19 +72,37 @@ describe("Incident service", () => {
             });
         });
 
-        it("does not create a duplicate active error-rate incident", async () => {
+        it("updates an existing active error-rate incident instead of creating a duplicate", async () => {
             queryMock
                 .mockResolvedValueOnce({
-                    rows: [{ total: 20, failed: 12 }]
+                    rows: [{ total: 20, failed: 16 }]
                 })
                 .mockResolvedValueOnce({
-                    rows: [{ id: "existing-incident" }]
+                    rows: [{
+                        id: "existing-incident",
+                        type: "HIGH_ERROR_RATE",
+                        actual_value: 80,
+                        started_at: "2026-10-30T10:00:00.000Z"
+                    }]
                 });
 
             await checkErrorRate("project-1");
 
             expect(queryMock).toHaveBeenCalledTimes(2);
-            expect(broadcastMock).not.toHaveBeenCalled();
+            expect(queryMock.mock.calls[1][0]).toContain("UPDATE incidents");
+            expect(queryMock.mock.calls[1][0]).toContain("SET actual_value = $2");
+            expect(queryMock.mock.calls[1][1]).toEqual(["project-1", 80]);
+
+            expect(broadcastMock).toHaveBeenCalledWith({
+                type: "incident_updated",
+                projectId: "project-1",
+                incident: {
+                    id: "existing-incident",
+                    type: "HIGH_ERROR_RATE",
+                    actual_value: 80,
+                    started_at: "2026-10-30T10:00:00.000Z"
+                }
+            });
         });
 
         it("does not broadcast when concurrent error-rate incident creation conflicts", async () => {
@@ -133,6 +151,24 @@ describe("Incident service", () => {
                     resolved_at: "now"
                 }
             });
+        });
+        it("uses deterministic ordering and limits recent requests to 20", async () => {
+            queryMock.mockResolvedValueOnce({
+                rows: [{ total: 0, failed: 0 }]
+            });
+
+            await checkErrorRate("project-1");
+
+            expect(queryMock.mock.calls[0][0]).toContain(
+                "ORDER BY created_at DESC, id DESC"
+            );
+
+            expect(queryMock.mock.calls[0][0]).toContain("LIMIT $2");
+
+            expect(queryMock.mock.calls[0][1]).toEqual([
+                "project-1",
+                20
+            ]);
         });
     });
 

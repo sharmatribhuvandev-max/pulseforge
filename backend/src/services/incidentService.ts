@@ -23,7 +23,7 @@ async function getRecentRequestStats(projectId: string) {
             SELECT error
             FROM api_requests
             WHERE project_id = $1
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, id DESC
             LIMIT $2
         ) recent_requests
         `,
@@ -54,55 +54,63 @@ export async function checkErrorRate(projectId: string) {
     if (errorRate >= ERROR_RATE_THRESHOLD) {
         const existing = await postgresPool.query(
             `
-            SELECT id
-            FROM incidents
+            UPDATE incidents
+            SET actual_value = $2
             WHERE project_id = $1
               AND type = 'HIGH_ERROR_RATE'
               AND resolved_at IS NULL
-            LIMIT 1
+            RETURNING *
             `,
-            [projectId]
+            [projectId, errorRate]
         );
 
-        if (existing.rows.length === 0) {
-            const incident = await postgresPool.query(
-                `
-                INSERT INTO incidents
-                (
-                    project_id,
-                    type,
-                    threshold,
-                    actual_value
-                )
-                VALUES ($1, $2, $3, $4)
-                ON CONFLICT (project_id, type)
-                WHERE resolved_at IS NULL
-                DO NOTHING
-                RETURNING *
-                `,
-                [
-                    projectId,
-                    "HIGH_ERROR_RATE",
-                    ERROR_RATE_THRESHOLD,
-                    errorRate
-                ]
-            );
-
-            if (incident.rows.length === 0) {
-                return;
-            }
-
+        if (existing.rows.length > 0) {
             broadcast({
-                type: "incident_created",
+                type: "incident_updated",
                 projectId,
-                incident: incident.rows[0]
+                incident: existing.rows[0]
             });
 
-            console.log(
-                "High error rate incident created:",
-                incident.rows[0]
-            );
+            return;
         }
+
+        const incident = await postgresPool.query(
+            `
+            INSERT INTO incidents
+            (
+                project_id,
+                type,
+                threshold,
+                actual_value
+            )
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (project_id, type)
+            WHERE resolved_at IS NULL
+            DO NOTHING
+            RETURNING *
+            `,
+            [
+                projectId,
+                "HIGH_ERROR_RATE",
+                ERROR_RATE_THRESHOLD,
+                errorRate
+            ]
+        );
+
+        if (incident.rows.length === 0) {
+            return;
+        }
+
+        broadcast({
+            type: "incident_created",
+            projectId,
+            incident: incident.rows[0]
+        });
+
+        console.log(
+            "High error rate incident created:",
+            incident.rows[0]
+        );
 
         return;
     }
