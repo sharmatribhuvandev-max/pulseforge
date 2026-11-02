@@ -10,6 +10,11 @@ import { isIP } from "node:net";
 import ipaddr from "ipaddr.js";
 
 const REQUEST_TIMEOUT_MS = 10_000;
+const MAX_RESPONSE_BYTES = 1_048_576;
+
+export interface OutboundRequestOptions {
+    timeoutMs?: number;
+}
 const DNS_CACHE_TTL_MS = 30_000;
 const DNS_CACHE_MAX_ENTRIES = 100;
 
@@ -483,15 +488,71 @@ export function destroyOutboundPool(): void {
     }
 }
 
+function createDeadlineError(timeoutMs: number): Error {
+    // A real AxiosError, so callers that classify with axios.isAxiosError and
+    // error.code treat the deadline as a timeout (monitorService maps it to 504).
+    return new axios.AxiosError(
+        `Outbound request deadline of ${timeoutMs}ms exceeded`,
+        "ECONNABORTED"
+    );
+}
+
 export async function requestOutbound(
     value: string,
-    method: string
+    method: string,
+    options?: OutboundRequestOptions
+): Promise<AxiosResponse> {
+    const timeoutMs = options?.timeoutMs ?? REQUEST_TIMEOUT_MS;
+    const controller = new AbortController();
+    let deadlineFired = false;
+    let rejectDeadline: (error: Error) => void = () => { };
+
+    const deadline = new Promise<never>((_resolve, reject) => {
+        rejectDeadline = reject;
+    });
+    // Avoid an unhandled rejection when nothing is racing against it.
+    deadline.catch(() => { });
+
+    const timer = setTimeout(() => {
+        deadlineFired = true;
+        controller.abort();
+        rejectDeadline(createDeadlineError(timeoutMs));
+    }, timeoutMs);
+
+    try {
+        return await performOutboundRequest(
+            value,
+            method,
+            timeoutMs,
+            controller.signal,
+            deadline
+        );
+    } catch (error) {
+        if (deadlineFired) {
+            throw createDeadlineError(timeoutMs);
+        }
+
+        throw error;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+async function performOutboundRequest(
+    value: string,
+    method: string,
+    timeoutMs: number,
+    signal: AbortSignal,
+    deadline: Promise<never>
 ): Promise<AxiosResponse> {
     const totalStart = performance.now();
     const parsedUrl = validateOutboundUrl(value);
 
     const dnsStart = performance.now();
-    const addresses = await resolvePublicAddresses(parsedUrl.hostname);
+    const resolving = resolvePublicAddresses(parsedUrl.hostname);
+    // If the deadline wins the race, a late DNS failure must not go unhandled.
+    resolving.catch(() => { });
+    const addresses = await Promise.race([resolving, deadline]);
     const dnsDurationMs = elapsedMs(dnsStart);
 
     const pinnedAddress = addresses[0];
@@ -510,7 +571,12 @@ export async function requestOutbound(
             const response = await axios({
                 method,
                 url: parsedUrl.toString(),
-                timeout: REQUEST_TIMEOUT_MS,
+                timeout: timeoutMs,
+                maxContentLength: MAX_RESPONSE_BYTES,
+                maxBodyLength: MAX_RESPONSE_BYTES,
+                validateStatus: (status: number) =>
+                    status >= 200 && status < 300,
+                signal,
                 maxRedirects: 0,
                 proxy: false,
                 httpAgent:

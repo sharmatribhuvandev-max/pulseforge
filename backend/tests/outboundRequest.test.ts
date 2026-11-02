@@ -170,6 +170,54 @@ describe("requestOutbound", () => {
         expect(config.httpAgent).toBeUndefined();
     });
 
+    it("sets a 1 MiB response and request body size limit", async () => {
+        dnsLookupMock.mockResolvedValueOnce([
+            { address: "93.184.216.34", family: 4 },
+        ]);
+
+        axiosMock.mockResolvedValueOnce({ status: 200 });
+
+        await requestOutbound("https://limits.example/health", "GET");
+
+        const config = axiosMock.mock.calls[0][0];
+
+        expect(config.maxContentLength).toBe(1_048_576);
+        expect(config.maxBodyLength).toBe(1_048_576);
+    });
+
+    it("treats only 2xx statuses as success", async () => {
+        dnsLookupMock.mockResolvedValueOnce([
+            { address: "93.184.216.34", family: 4 },
+        ]);
+
+        axiosMock.mockResolvedValueOnce({ status: 200 });
+
+        await requestOutbound("https://status-rule.example/health", "GET");
+
+        const { validateStatus } = axiosMock.mock.calls[0][0];
+
+        expect(typeof validateStatus).toBe("function");
+        expect(validateStatus(200)).toBe(true);
+        expect(validateStatus(299)).toBe(true);
+        expect(validateStatus(199)).toBe(false);
+        expect(validateStatus(300)).toBe(false);
+        expect(validateStatus(404)).toBe(false);
+    });
+
+    it("passes an abort signal to axios for the overall deadline", async () => {
+        dnsLookupMock.mockResolvedValueOnce([
+            { address: "93.184.216.34", family: 4 },
+        ]);
+
+        axiosMock.mockResolvedValueOnce({ status: 200 });
+
+        await requestOutbound("https://deadline-signal.example/health", "GET");
+
+        const config = axiosMock.mock.calls[0][0];
+
+        expect(config.signal).toBeInstanceOf(AbortSignal);
+    });
+
     it.each([
         "http://100.64.0.1/health",
         "http://192.0.2.1/health",
