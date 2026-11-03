@@ -13,7 +13,7 @@ async function loadEnv() {
 describe("Environment configuration: FRONTEND_URL", () => {
     beforeEach(() => {
         vi.stubEnv("MONGO_URI", "mongodb://placeholder");
-        vi.stubEnv("JWT_SECRET", "placeholder-secret-for-tests");
+        vi.stubEnv("JWT_SECRET", "placeholder-secret-for-tests-0123456789");
         vi.stubEnv("POSTGRES_PASSWORD", "placeholder");
     });
 

@@ -1,6 +1,9 @@
 import { Response } from "express";
 import { AuthRequest } from "../middleware/authMiddleware";
-import { issueWebSocketTicket } from "../services/webSocketTicketService";
+import {
+    issueWebSocketTicket,
+    WebSocketTicketLimitError,
+} from "../services/webSocketTicketService";
 
 export function createWebSocketTicket(
     req: AuthRequest,
@@ -22,6 +25,12 @@ export function createWebSocketTicket(
             expiresIn: 30,
         });
     } catch (error) {
+        if (error instanceof WebSocketTicketLimitError) {
+            return res.status(429).json({
+                message: "Too many pending WebSocket tickets. Please try again shortly.",
+            });
+        }
+
         if (
             error instanceof Error &&
             error.message === "WebSocket ticket capacity reached"

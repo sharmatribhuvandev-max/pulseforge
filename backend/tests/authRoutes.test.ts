@@ -8,7 +8,7 @@ vi.mock("../src/controllers/authController", () => ({
         res.status(200).json({ route: "signup" }),
     ),
     signin: vi.fn((_req, res) =>
-        res.status(200).json({ route: "signin" }),
+        res.status(401).json({ route: "signin" }),
     ),
 }));
 
@@ -48,12 +48,12 @@ describe("Authentication route rate limiting", () => {
         );
     });
 
-    it("limits signin requests", async () => {
+    it("limits failed signin attempts", async () => {
         const app = await createTestApp();
 
         for (let i = 0; i < 10; i++) {
             const response = await request(app).post("/auth/signin");
-            expect(response.status).toBe(200);
+            expect(response.status).toBe(401);
         }
 
         const response = await request(app).post("/auth/signin");

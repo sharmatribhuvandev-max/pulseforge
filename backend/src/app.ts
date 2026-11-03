@@ -1,7 +1,9 @@
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
 
 import { env } from "./config/env";
+import { applyTrustProxy } from "./config/trustProxy";
 
 import apiRoutes from "./routes/apiRoutes";
 import authRoutes from "./routes/authRoutes";
@@ -12,6 +14,10 @@ import analyticsRoutes from "./routes/analyticsRoutes";
 import incidentRoutes from "./routes/incidentRoutes";
 
 const app = express();
+
+applyTrustProxy(app, env.trustProxyHops);
+
+app.use(helmet());
 
 app.use(
     cors({
@@ -29,11 +35,13 @@ app.get("/", (_req, res) => {
     });
 });
 
-app.get("/test-success", (_req, res) => {
-    res.status(200).json({
-        message: "Test API successful",
+if (!env.isProduction) {
+    app.get("/test-success", (_req, res) => {
+        res.status(200).json({
+            message: "Test API successful",
+        });
     });
-});
+}
 
 app.use("/api", apiRoutes);
 app.use("/auth", authRoutes);

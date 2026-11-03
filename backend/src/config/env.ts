@@ -35,7 +35,15 @@ function positiveInteger(
 }
 
 const mongoUri = requiredString("MONGO_URI");
+const MIN_JWT_SECRET_LENGTH = 32;
+
 const jwtSecret = requiredString("JWT_SECRET");
+
+if (jwtSecret.length < MIN_JWT_SECRET_LENGTH) {
+    throw new Error(
+        `JWT_SECRET must be at least ${MIN_JWT_SECRET_LENGTH} characters`,
+    );
+}
 const postgresPassword = requiredString("POSTGRES_PASSWORD");
 
 const rawFrontendUrl =
@@ -71,10 +79,40 @@ function parseFrontendOrigin(value: string): string {
 
 const frontendUrl = parseFrontendOrigin(rawFrontendUrl);
 
+// Number of reverse proxies in front of the app that Express may trust for
+// X-Forwarded-For. 0 (the default) trusts none. Digits only, so values such
+// as "1e1", "-1" or "true" are rejected instead of being coerced.
+const MAX_TRUST_PROXY_HOPS = 10;
+
+function parseTrustProxyHops(rawValue: string | undefined): number {
+    const value = rawValue?.trim() ?? "";
+
+    if (value === "") {
+        return 0;
+    }
+
+    if (!/^\d+$/.test(value) || Number(value) > MAX_TRUST_PROXY_HOPS) {
+        throw new Error(
+            `TRUST_PROXY_HOPS must be an integer from 0 to ${MAX_TRUST_PROXY_HOPS}`,
+        );
+    }
+
+    return Number(value);
+}
+
+const trustProxyHops = parseTrustProxyHops(process.env.TRUST_PROXY_HOPS);
+
+// Test-only routes are hidden when NODE_ENV is exactly "production" (after
+// trimming). Any other value, including unset, counts as not production.
+const isProduction = process.env.NODE_ENV?.trim() === "production";
+
 export const env = {
     port: positiveInteger("PORT", 3000),
 
     frontendUrl,
+
+    trustProxyHops,
+    isProduction,
 
     mongoUri,
 
