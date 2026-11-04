@@ -2,6 +2,7 @@
 import type { Incident } from "../services/projectService";
 import type { Endpoint } from "../services/endpointService";
 import { incidentEndpointLabel } from "./incidentEndpointLabel";
+import { formatRecoveryProgress } from "./recoveryProgress";
 
 interface IncidentPanelProps {
     activeIncidents: Incident[];
@@ -92,6 +93,12 @@ function IncidentPanel({
                                                 incident.started_at
                                             ).toLocaleString()}
                                         </p>
+
+                                        {formatRecoveryProgress(incident) && (
+                                            <p className="text-sm text-slate-500 mt-1">
+                                                {formatRecoveryProgress(incident)}
+                                            </p>
+                                        )}
                                     </div>
 
                                     <span className="px-2 py-1 rounded bg-red-500/10 text-red-400 text-xs font-medium">

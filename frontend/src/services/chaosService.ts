@@ -34,11 +34,12 @@ const getAuthHeaders = () => {
 };
 
 export const getChaosRules = async (
-    endpointId: string
+    endpointId: string,
+    options: { signal?: AbortSignal } = {}
 ): Promise<ChaosRule[]> => {
     const response = await axios.get(
         `${API_URL}/chaos/endpoint/${endpointId}`,
-        { headers: getAuthHeaders() }
+        { headers: getAuthHeaders(), signal: options.signal }
     );
 
     return response.data.chaosRules;

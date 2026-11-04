@@ -4,7 +4,9 @@ import { describe, expect, it } from "vitest";
 import {
     getReconnectDelay,
     RECONNECT_MAX_DELAY_MS,
+    shouldSlowDown,
     shouldStopReconnecting,
+    SLOW_DOWN_ATTEMPT,
 } from "./reconnectBackoff";
 
 const lowest = () => 0;
@@ -64,5 +66,24 @@ describe("shouldStopReconnecting", () => {
         expect(
             shouldStopReconnecting(new Error("Invalid WebSocket ticket response")),
         ).toBe(false);
+    });
+});
+
+describe("shouldSlowDown", () => {
+    it("slows down only on 429 or 503 from the ticket request", () => {
+        expect(shouldSlowDown(httpError(429))).toBe(true);
+        expect(shouldSlowDown(httpError(503))).toBe(true);
+
+        expect(shouldSlowDown(httpError(401))).toBe(false);
+        expect(shouldSlowDown(httpError(500))).toBe(false);
+        expect(
+            shouldSlowDown(new AxiosError("Network Error", "ERR_NETWORK")),
+        ).toBe(false);
+        expect(shouldSlowDown(new Error("boom"))).toBe(false);
+    });
+
+    it("jumps straight to the 15-30 second cap", () => {
+        expect(getReconnectDelay(SLOW_DOWN_ATTEMPT, lowest)).toBe(15_000);
+        expect(getReconnectDelay(SLOW_DOWN_ATTEMPT, highest)).toBe(RECONNECT_MAX_DELAY_MS);
     });
 });

@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { FormEvent } from "react";
 
 import { useWebSocket } from "../hooks/useWebSocket";
+import { getRefreshDelay } from "./refreshSchedule";
 
 import {
     getProjects,
@@ -51,7 +52,11 @@ function Dashboard() {
     const {
         events,
         connected,
+        reconnects,
     } = useWebSocket();
+
+    // Time of the oldest WebSocket event whose data has not been reloaded yet.
+    const firstPendingEventAt = useRef<number | null>(null);
 
     const [historicalEvents, setHistoricalEvents] =
         useState<RecentApiEvent[]>([]);
@@ -535,6 +540,7 @@ function Dashboard() {
             latestEvent.type === "incident_resolved"
         ) {
             const timer = setTimeout(() => {
+                firstPendingEventAt.current = null;
                 void loadProjectData();
             }, 0);
 
@@ -543,14 +549,43 @@ function Dashboard() {
             };
         }
 
+        const now = Date.now();
+
+        if (firstPendingEventAt.current === null) {
+            firstPendingEventAt.current = now;
+        }
+
         const timer = setTimeout(() => {
+            firstPendingEventAt.current = null;
             void loadProjectData();
-        }, 300);
+        }, getRefreshDelay(now, firstPendingEventAt.current));
 
         return () => {
             clearTimeout(timer);
         };
     }, [events, loadProjectData]);
+
+
+    /*
+     * Reload after a WebSocket reconnect, so incidents and stats missed
+     * while disconnected are not left stale.
+     */
+    const handledReconnects = useRef(0);
+
+    useEffect(() => {
+        if (reconnects === handledReconnects.current) {
+            return;
+        }
+
+        const timer = setTimeout(() => {
+            handledReconnects.current = reconnects;
+            void loadProjectData();
+        }, 0);
+
+        return () => {
+            clearTimeout(timer);
+        };
+    }, [reconnects, loadProjectData]);
 
 
 

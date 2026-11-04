@@ -78,7 +78,8 @@ export interface CheckEndpointResponse {
 }
 
 export const checkEndpoint = async (
-    endpointId: string
+    endpointId: string,
+    options: { signal?: AbortSignal } = {}
 ): Promise<CheckEndpointResponse> => {
     const token = localStorage.getItem("token");
 
@@ -88,6 +89,7 @@ export const checkEndpoint = async (
             headers: {
                 Authorization: `Bearer ${token}`,
             },
+            signal: options.signal,
         }
     );
 

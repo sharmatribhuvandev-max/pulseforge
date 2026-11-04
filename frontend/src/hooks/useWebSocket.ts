@@ -3,7 +3,9 @@ import axios from "axios";
 import { API_URL } from "../config";
 import {
     getReconnectDelay,
+    shouldSlowDown,
     shouldStopReconnecting,
+    SLOW_DOWN_ATTEMPT,
 } from "./reconnectBackoff";
 
 export interface Incident {
@@ -13,6 +15,7 @@ export interface Incident {
     type: string;
     threshold: number | string;
     actual_value: number | string;
+    healthy_checks?: number | null;
     started_at: string;
     resolved_at: string | null;
 }
@@ -46,6 +49,9 @@ interface WebSocketTicketResponse {
 export const useWebSocket = () => {
     const [events, setEvents] = useState<WebSocketEvent[]>([]);
     const [connected, setConnected] = useState(false);
+    // Successful reopens after the first connection; the dashboard reloads
+    // on each so state missed while disconnected cannot stay stale.
+    const [reconnects, setReconnects] = useState(0);
 
     useEffect(() => {
         let socket: WebSocket | null = null;
@@ -53,6 +59,7 @@ export const useWebSocket = () => {
         let stopped = false;
         let connecting = false;
         let failedAttempts = 0;
+        let hasOpened = false;
 
         const scheduleReconnect = () => {
             if (stopped || reconnectTimer) return;
@@ -111,6 +118,12 @@ export const useWebSocket = () => {
 
                     failedAttempts = 0;
                     setConnected(true);
+
+                    if (hasOpened) {
+                        setReconnects((count) => count + 1);
+                    }
+
+                    hasOpened = true;
                 };
 
                 currentSocket.onmessage = (message) => {
@@ -160,9 +173,13 @@ export const useWebSocket = () => {
             } catch (error) {
                 setConnected(false);
 
-                if (!shouldStopReconnecting(error)) {
-                    scheduleReconnect();
+                if (shouldStopReconnecting(error)) return;
+
+                if (shouldSlowDown(error)) {
+                    failedAttempts = Math.max(failedAttempts, SLOW_DOWN_ATTEMPT);
                 }
+
+                scheduleReconnect();
             } finally {
                 connecting = false;
             }
@@ -192,5 +209,6 @@ export const useWebSocket = () => {
     return {
         events,
         connected,
+        reconnects,
     };
 };

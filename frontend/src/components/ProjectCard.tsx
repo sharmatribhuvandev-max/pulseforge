@@ -473,6 +473,7 @@ function ProjectCard({
                                     <ChaosControls
                                         endpointId={endpoint._id}
                                         endpointName={endpointName}
+                                        onRecoveryVerified={onEndpointCreated}
                                     />
                                 </div>
                             );

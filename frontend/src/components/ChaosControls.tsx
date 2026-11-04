@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
     createChaosRule,
     getChaosRules,
@@ -7,6 +7,11 @@ import {
 } from "../services/chaosService";
 import type { ChaosRule } from "../services/chaosService";
 import { checkEndpoint } from "../services/endpointService";
+import {
+    isLatencyHealthy,
+    LATENCY_THRESHOLD_MS,
+    REQUIRED_HEALTHY_CHECKS,
+} from "../incidentPolicy";
 
 interface ChaosControlsProps {
     endpointId: string;
@@ -40,6 +45,16 @@ function ChaosControls({
     const [message, setMessage] = useState("");
     const [recoveryChecks, setRecoveryChecks] = useState<RecoveryCheck[]>([]);
     const [recoveryComplete, setRecoveryComplete] = useState(false);
+
+    // Aborted on unmount so an in-progress recovery check stops cleanly:
+    // no further requests, no state updates and no dashboard refresh.
+    const verifyController = useRef<AbortController | null>(null);
+
+    useEffect(() => {
+        return () => {
+            verifyController.current?.abort();
+        };
+    }, []);
 
     useEffect(() => {
         let cancelled = false;
@@ -197,6 +212,10 @@ function ChaosControls({
 
 
     const handleVerifyRecovery = async () => {
+        const controller = new AbortController();
+        const { signal } = controller;
+        verifyController.current = controller;
+
         setError("");
         setMessage("");
         setRecoveryChecks([]);
@@ -206,7 +225,8 @@ function ChaosControls({
             setVerifying(true);
 
             // Load every chaos rule for this endpoint.
-            const rules = await getChaosRules(endpointId);
+            const rules = await getChaosRules(endpointId, { signal });
+            if (signal.aborted) return;
 
             // Disable every enabled rule, including older rules
             // that may have been enabled before the backend fix.
@@ -216,10 +236,12 @@ function ChaosControls({
                 await updateChaosRule(activeRule._id, {
                     enabled: false,
                 });
+                if (signal.aborted) return;
             }
 
             // Refresh the local rule state after disabling chaos.
-            const refreshedRules = await getChaosRules(endpointId);
+            const refreshedRules = await getChaosRules(endpointId, { signal });
+            if (signal.aborted) return;
             const currentRule = refreshedRules[0] ?? null;
 
             setRule(currentRule);
@@ -243,9 +265,9 @@ function ChaosControls({
 
             const checks: RecoveryCheck[] = [];
 
-            for (let attempt = 1; attempt <= 3; attempt++) {
+            for (let attempt = 1; attempt <= REQUIRED_HEALTHY_CHECKS; attempt++) {
                 try {
-                    const response = await checkEndpoint(endpointId);
+                    const response = await checkEndpoint(endpointId, { signal });
                     const result = response.result;
 
                     if (!result) {
@@ -290,6 +312,7 @@ function ChaosControls({
                     });
                 }
 
+                if (signal.aborted) return;
                 setRecoveryChecks([...checks]);
             }
 
@@ -313,13 +336,20 @@ function ChaosControls({
                 }
             }
         } catch (err) {
+            if (signal.aborted) return;
             setError(
                 err instanceof Error
                     ? err.message
                     : "Unable to verify recovery."
             );
         } finally {
-            setVerifying(false);
+            if (!signal.aborted) {
+                setVerifying(false);
+            }
+
+            if (verifyController.current === controller) {
+                verifyController.current = null;
+            }
         }
     };
 
@@ -338,7 +368,7 @@ function ChaosControls({
 
     const recoveryPassed =
         recoveryComplete &&
-        recoveryChecks.length === 3 &&
+        recoveryChecks.length === REQUIRED_HEALTHY_CHECKS &&
         recoveryChecks.every(
             (check) =>
                 check.success &&
@@ -350,9 +380,7 @@ function ChaosControls({
     const latencyRecoveryPassed =
         recoveryPassed &&
         recoveryChecks.every(
-            (check) =>
-                check.latency !== null &&
-                check.latency < 1000
+            (check) => isLatencyHealthy(check.latency)
         );
 
     return (
@@ -492,7 +520,7 @@ function ChaosControls({
                     disabled={loading || saving || verifying}
                     className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                    {verifying ? "Checking recovery..." : "Verify Recovery"}
+                    {verifying ? "Disabling chaos and checking..." : "Disable Chaos & Verify"}
                 </button>
             </div>
 
@@ -587,8 +615,8 @@ function ChaosControls({
                                 }`}
                         >
                             {latencyRecoveryPassed
-                                ? "All three requests were below the 1000 ms latency threshold."
-                                : "Not recovered: all three requests must be below 1000 ms."}
+                                ? `All three requests were below the ${LATENCY_THRESHOLD_MS} ms latency threshold.`
+                                : `Not recovered: all three requests must be below ${LATENCY_THRESHOLD_MS} ms.`}
                         </p>
                     </div>
 
@@ -601,8 +629,7 @@ function ChaosControls({
                                 check.statusCode < 300;
 
                             const latencyHealthy =
-                                check.latency !== null &&
-                                check.latency < 1000;
+                                isLatencyHealthy(check.latency);
 
                             return (
                                 <div
@@ -639,7 +666,7 @@ function ChaosControls({
                                             ? "Latency unavailable"
                                             : latencyHealthy
                                                 ? "Latency within threshold"
-                                                : "Latency above threshold (1000 ms)"}
+                                                : `Latency above threshold (${LATENCY_THRESHOLD_MS} ms)`}
                                     </p>
                                 </div>
                             );

@@ -170,6 +170,7 @@ export interface Incident {
     type: string;
     threshold: number | string;
     actual_value: number | string;
+    healthy_checks?: number | null;
     started_at: string;
     resolved_at: string | null;
 }
