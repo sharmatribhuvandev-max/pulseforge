@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { API_URL } from "../config";
+import {
+    getReconnectDelay,
+    shouldStopReconnecting,
+} from "./reconnectBackoff";
 
 export interface Incident {
     id: number | string;
@@ -32,7 +36,6 @@ export interface WebSocketEvent {
 }
 
 const MAX_EVENTS = 100;
-const RECONNECT_DELAY_MS = 3000;
 
 interface WebSocketTicketResponse {
     ticket: string;
@@ -48,14 +51,18 @@ export const useWebSocket = () => {
         let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
         let stopped = false;
         let connecting = false;
+        let failedAttempts = 0;
 
         const scheduleReconnect = () => {
             if (stopped || reconnectTimer) return;
 
+            const delay = getReconnectDelay(failedAttempts);
+            failedAttempts += 1;
+
             reconnectTimer = setTimeout(() => {
                 reconnectTimer = null;
                 void connect();
-            }, RECONNECT_DELAY_MS);
+            }, delay);
         };
 
         const connect = async () => {
@@ -101,6 +108,7 @@ export const useWebSocket = () => {
                 currentSocket.onopen = () => {
                     if (stopped || socket !== currentSocket) return;
 
+                    failedAttempts = 0;
                     setConnected(true);
                 };
 
@@ -148,9 +156,12 @@ export const useWebSocket = () => {
                         setConnected(false);
                     }
                 };
-            } catch {
+            } catch (error) {
                 setConnected(false);
-                scheduleReconnect();
+
+                if (!shouldStopReconnecting(error)) {
+                    scheduleReconnect();
+                }
             } finally {
                 connecting = false;
             }
