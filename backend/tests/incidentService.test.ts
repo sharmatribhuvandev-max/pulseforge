@@ -475,6 +475,30 @@ describe("Incident service", () => {
             );
         });
 
+        it("keeps the recorded latency when a fast request fails", async () => {
+            queryMock.mockResolvedValueOnce({
+                rows: [{
+                    id: "incident-2",
+                    type: "HIGH_LATENCY",
+                    healthy_checks: 0,
+                    actual_value: 1500
+                }]
+            });
+
+            await checkLatency(PROJECT_ID, ENDPOINT_ID, 50, false);
+
+            const sql = queryMock.mock.calls[0][0].replace(/\s+/g, " ");
+
+            expect(sql).toContain(
+                "actual_value = CASE WHEN $3 = 1 THEN $4 ELSE actual_value END"
+            );
+            expect(queryMock.mock.calls[0][1]).toEqual([
+                PROJECT_ID,
+                ENDPOINT_ID,
+                0,
+                50
+            ]);
+        });
     });
 
     describe("resolveErrorRateIncident", () => {

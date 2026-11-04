@@ -301,6 +301,9 @@ export async function resolveLatencyIncident(
 
     const healthyIncrement = requestSucceeded ? 1 : 0;
 
+    // A failed request still resets recovery, but its latency (for example a
+    // fast connection refusal) is not a response-time measurement, so it
+    // does not replace the recorded actual_value.
     const result = await postgresPool.query(
         `
         UPDATE incidents
@@ -309,7 +312,10 @@ export async function resolveLatencyIncident(
                 WHEN $3 = 1 THEN healthy_checks + 1
                 ELSE 0
             END,
-            actual_value = $4,
+            actual_value = CASE
+                WHEN $3 = 1 THEN $4
+                ELSE actual_value
+            END,
             resolved_at = CASE
                 WHEN $3 = 1 AND healthy_checks + 1 >= 3
                     THEN NOW()
