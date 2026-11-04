@@ -9,6 +9,18 @@ export const postgresPool = new Pool({
     database: env.postgres.database
 });
 
+// An idle client can lose its connection, for example when Neon suspends
+// compute. pg-pool removes that client and emits "error" on the pool; with
+// no listener, Node throws and the process crashes. pg attaches the client
+// to the error, so log selected fields only.
+postgresPool.on("error", (error: Error & { code?: string }) => {
+    console.error("PostgreSQL idle client error:", {
+        name: error.name,
+        code: error.code,
+        message: error.message,
+    });
+});
+
 export async function connectPostgres() {
     try {
         const client = await postgresPool.connect();
