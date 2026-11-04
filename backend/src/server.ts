@@ -50,7 +50,9 @@ async function startServer() {
     } catch (error) {
         console.error("PulseForge startup failed:", error);
 
-        await postgresPool.end().catch(() => undefined);
+        // Close both databases. An open MongoDB connection keeps the event
+        // loop alive, so the process would never exit.
+        await closeDatabases().catch(() => undefined);
         process.exitCode = 1;
     }
 }
