@@ -19,9 +19,14 @@ vi.mock("../src/services/websocketService", () => ({
 import {
     checkErrorRate,
     checkLatency,
+    resolveEndpointIncidents,
     resolveErrorRateIncident,
     resolveLatencyIncident
 } from "../src/services/incidentService";
+
+const PROJECT_ID = "project-1";
+const ENDPOINT_ID = "endpoint-a";
+const OTHER_ENDPOINT_ID = "endpoint-b";
 
 describe("Incident service", () => {
     beforeEach(() => {
@@ -31,18 +36,38 @@ describe("Incident service", () => {
     });
 
     describe("checkErrorRate", () => {
-        it("does nothing when there are no recent requests", async () => {
+        it("does nothing when the endpoint has no recent requests", async () => {
             queryMock.mockResolvedValueOnce({
                 rows: [{ total: 0, failed: 0 }]
             });
 
-            await checkErrorRate("project-1");
+            await checkErrorRate(PROJECT_ID, ENDPOINT_ID);
 
             expect(queryMock).toHaveBeenCalledOnce();
             expect(broadcastMock).not.toHaveBeenCalled();
         });
 
-        it("creates an incident when error rate reaches 50%", async () => {
+        it("limits the recent-request window to the 20 latest requests of the endpoint", async () => {
+            queryMock.mockResolvedValueOnce({
+                rows: [{ total: 0, failed: 0 }]
+            });
+
+            await checkErrorRate(PROJECT_ID, ENDPOINT_ID);
+
+            const sql = queryMock.mock.calls[0][0];
+
+            expect(sql).toContain("WHERE project_id = $1");
+            expect(sql).toContain("AND endpoint_id = $2");
+            expect(sql).toContain("ORDER BY created_at DESC, id DESC");
+            expect(sql).toContain("LIMIT $3");
+            expect(queryMock.mock.calls[0][1]).toEqual([
+                PROJECT_ID,
+                ENDPOINT_ID,
+                20
+            ]);
+        });
+
+        it("creates an incident for the endpoint when its error rate reaches 50%", async () => {
             queryMock
                 .mockResolvedValueOnce({
                     rows: [{ total: 20, failed: 10 }]
@@ -52,11 +77,13 @@ describe("Incident service", () => {
                     rows: [{ id: "incident-1", type: "HIGH_ERROR_RATE" }]
                 });
 
-            await checkErrorRate("project-1");
+            await checkErrorRate(PROJECT_ID, ENDPOINT_ID);
 
             expect(queryMock).toHaveBeenCalledTimes(3);
+            expect(queryMock.mock.calls[2][0]).toContain("endpoint_id");
             expect(queryMock.mock.calls[2][1]).toEqual([
-                "project-1",
+                PROJECT_ID,
+                ENDPOINT_ID,
                 "HIGH_ERROR_RATE",
                 50,
                 50
@@ -64,7 +91,7 @@ describe("Incident service", () => {
 
             expect(broadcastMock).toHaveBeenCalledWith({
                 type: "incident_created",
-                projectId: "project-1",
+                projectId: PROJECT_ID,
                 incident: {
                     id: "incident-1",
                     type: "HIGH_ERROR_RATE"
@@ -72,7 +99,7 @@ describe("Incident service", () => {
             });
         });
 
-        it("updates an existing active error-rate incident instead of creating a duplicate", async () => {
+        it("updates the endpoint's active error-rate incident instead of creating a duplicate", async () => {
             queryMock
                 .mockResolvedValueOnce({
                     rows: [{ total: 20, failed: 16 }]
@@ -86,16 +113,21 @@ describe("Incident service", () => {
                     }]
                 });
 
-            await checkErrorRate("project-1");
+            await checkErrorRate(PROJECT_ID, ENDPOINT_ID);
 
             expect(queryMock).toHaveBeenCalledTimes(2);
             expect(queryMock.mock.calls[1][0]).toContain("UPDATE incidents");
-            expect(queryMock.mock.calls[1][0]).toContain("SET actual_value = $2");
-            expect(queryMock.mock.calls[1][1]).toEqual(["project-1", 80]);
+            expect(queryMock.mock.calls[1][0]).toContain("SET actual_value = $3");
+            expect(queryMock.mock.calls[1][0]).toContain("AND endpoint_id = $2");
+            expect(queryMock.mock.calls[1][1]).toEqual([
+                PROJECT_ID,
+                ENDPOINT_ID,
+                80
+            ]);
 
             expect(broadcastMock).toHaveBeenCalledWith({
                 type: "incident_updated",
-                projectId: "project-1",
+                projectId: PROJECT_ID,
                 incident: {
                     id: "existing-incident",
                     type: "HIGH_ERROR_RATE",
@@ -113,17 +145,18 @@ describe("Incident service", () => {
                 .mockResolvedValueOnce({ rows: [] })
                 .mockResolvedValueOnce({ rows: [] });
 
-            await checkErrorRate("project-1");
+            await checkErrorRate(PROJECT_ID, ENDPOINT_ID);
 
             expect(queryMock).toHaveBeenCalledTimes(3);
             expect(queryMock.mock.calls[2][0]).toContain(
-                "ON CONFLICT (project_id, type)"
+                "ON CONFLICT (project_id, endpoint_id, type)"
             );
+            expect(queryMock.mock.calls[2][0]).toContain("WHERE resolved_at IS NULL");
             expect(queryMock.mock.calls[2][0]).toContain("DO NOTHING");
             expect(broadcastMock).not.toHaveBeenCalled();
         });
 
-        it("resolves an active incident when error rate falls below 50%", async () => {
+        it("resolves the endpoint's active incident when its error rate falls below 50%", async () => {
             queryMock
                 .mockResolvedValueOnce({
                     rows: [{ total: 20, failed: 2 }]
@@ -135,9 +168,14 @@ describe("Incident service", () => {
                     rows: [{ id: "incident-1", resolved_at: "now" }]
                 });
 
-            await checkErrorRate("project-1");
+            await checkErrorRate(PROJECT_ID, ENDPOINT_ID);
 
             expect(queryMock).toHaveBeenCalledTimes(3);
+            expect(queryMock.mock.calls[1][0]).toContain("AND endpoint_id = $2");
+            expect(queryMock.mock.calls[1][1]).toEqual([
+                PROJECT_ID,
+                ENDPOINT_ID
+            ]);
             expect(queryMock.mock.calls[2][1]).toEqual([
                 "incident-1",
                 10
@@ -145,46 +183,30 @@ describe("Incident service", () => {
 
             expect(broadcastMock).toHaveBeenCalledWith({
                 type: "incident_resolved",
-                projectId: "project-1",
+                projectId: PROJECT_ID,
                 incident: {
                     id: "incident-1",
                     resolved_at: "now"
                 }
             });
         });
-        it("uses deterministic ordering and limits recent requests to 20", async () => {
-            queryMock.mockResolvedValueOnce({
-                rows: [{ total: 0, failed: 0 }]
-            });
-
-            await checkErrorRate("project-1");
-
-            expect(queryMock.mock.calls[0][0]).toContain(
-                "ORDER BY created_at DESC, id DESC"
-            );
-
-            expect(queryMock.mock.calls[0][0]).toContain("LIMIT $2");
-
-            expect(queryMock.mock.calls[0][1]).toEqual([
-                "project-1",
-                20
-            ]);
-        });
     });
 
     describe("checkLatency", () => {
-        it("creates an incident when latency reaches 1000 ms", async () => {
+        it("creates an incident for the endpoint when latency reaches 1000 ms", async () => {
             queryMock
                 .mockResolvedValueOnce({ rows: [] })
                 .mockResolvedValueOnce({
                     rows: [{ id: "incident-2", type: "HIGH_LATENCY" }]
                 });
 
-            await checkLatency("project-1", 1000, true);
+            await checkLatency(PROJECT_ID, ENDPOINT_ID, 1000, true);
 
             expect(queryMock).toHaveBeenCalledTimes(2);
+            expect(queryMock.mock.calls[1][0]).toContain("endpoint_id");
             expect(queryMock.mock.calls[1][1]).toEqual([
-                "project-1",
+                PROJECT_ID,
+                ENDPOINT_ID,
                 "HIGH_LATENCY",
                 1000,
                 1000
@@ -192,7 +214,7 @@ describe("Incident service", () => {
 
             expect(broadcastMock).toHaveBeenCalledWith({
                 type: "incident_created",
-                projectId: "project-1",
+                projectId: PROJECT_ID,
                 incident: {
                     id: "incident-2",
                     type: "HIGH_LATENCY"
@@ -205,17 +227,18 @@ describe("Incident service", () => {
                 .mockResolvedValueOnce({ rows: [] })
                 .mockResolvedValueOnce({ rows: [] });
 
-            await checkLatency("project-1", 1200, true);
+            await checkLatency(PROJECT_ID, ENDPOINT_ID, 1200, true);
 
             expect(queryMock).toHaveBeenCalledTimes(2);
             expect(queryMock.mock.calls[1][0]).toContain(
-                "ON CONFLICT (project_id, type)"
+                "ON CONFLICT (project_id, endpoint_id, type)"
             );
+            expect(queryMock.mock.calls[1][0]).toContain("WHERE resolved_at IS NULL");
             expect(queryMock.mock.calls[1][0]).toContain("DO NOTHING");
             expect(broadcastMock).not.toHaveBeenCalled();
         });
 
-        it("updates an existing active latency incident without creating a duplicate", async () => {
+        it("updates the endpoint's active latency incident without creating a duplicate", async () => {
             queryMock.mockResolvedValueOnce({
                 rows: [{
                     id: "existing-incident",
@@ -225,13 +248,15 @@ describe("Incident service", () => {
                 }]
             });
 
-            await checkLatency("project-1", 1500, true);
+            await checkLatency(PROJECT_ID, ENDPOINT_ID, 1500, true);
 
             expect(queryMock).toHaveBeenCalledOnce();
             expect(queryMock.mock.calls[0][0]).toContain("UPDATE incidents");
             expect(queryMock.mock.calls[0][0]).toContain("healthy_checks = 0");
+            expect(queryMock.mock.calls[0][0]).toContain("AND endpoint_id = $2");
             expect(queryMock.mock.calls[0][1]).toEqual([
-                "project-1",
+                PROJECT_ID,
+                ENDPOINT_ID,
                 1500
             ]);
             expect(queryMock.mock.calls[0][0]).not.toContain(
@@ -240,7 +265,7 @@ describe("Incident service", () => {
 
             expect(broadcastMock).toHaveBeenCalledWith({
                 type: "incident_updated",
-                projectId: "project-1",
+                projectId: PROJECT_ID,
                 incident: {
                     id: "existing-incident",
                     type: "HIGH_LATENCY",
@@ -260,17 +285,18 @@ describe("Incident service", () => {
                 }]
             });
 
-            await checkLatency("project-1", 1314, true);
+            await checkLatency(PROJECT_ID, ENDPOINT_ID, 1314, true);
 
             expect(queryMock).toHaveBeenCalledOnce();
             expect(queryMock.mock.calls[0][1]).toEqual([
-                "project-1",
+                PROJECT_ID,
+                ENDPOINT_ID,
                 1314
             ]);
 
             expect(broadcastMock).toHaveBeenCalledWith({
                 type: "incident_updated",
-                projectId: "project-1",
+                projectId: PROJECT_ID,
                 incident: {
                     id: "existing-incident",
                     type: "HIGH_LATENCY",
@@ -290,21 +316,22 @@ describe("Incident service", () => {
                 }]
             });
 
-            await checkLatency("project-1", 500, true);
+            await checkLatency(PROJECT_ID, ENDPOINT_ID, 500, true);
 
             expect(queryMock).toHaveBeenCalledOnce();
             expect(queryMock.mock.calls[0][0]).toContain(
                 "healthy_checks + 1 >= 3"
             );
             expect(queryMock.mock.calls[0][1]).toEqual([
-                "project-1",
+                PROJECT_ID,
+                ENDPOINT_ID,
                 1,
                 500
             ]);
 
             expect(broadcastMock).toHaveBeenCalledWith({
                 type: "incident_updated",
-                projectId: "project-1",
+                projectId: PROJECT_ID,
                 incident: {
                     id: "incident-2",
                     type: "HIGH_LATENCY",
@@ -331,21 +358,22 @@ describe("Incident service", () => {
                 }]
             });
 
-            await checkLatency("project-1", 500, true);
+            await checkLatency(PROJECT_ID, ENDPOINT_ID, 500, true);
 
             expect(queryMock).toHaveBeenCalledOnce();
             expect(queryMock.mock.calls[0][0]).toContain(
                 "healthy_checks + 1 >= 3"
             );
             expect(queryMock.mock.calls[0][1]).toEqual([
-                "project-1",
+                PROJECT_ID,
+                ENDPOINT_ID,
                 1,
                 500
             ]);
 
             expect(broadcastMock).toHaveBeenCalledWith({
                 type: "incident_resolved",
-                projectId: "project-1",
+                projectId: PROJECT_ID,
                 incident: {
                     id: "incident-2",
                     type: "HIGH_LATENCY",
@@ -354,6 +382,22 @@ describe("Incident service", () => {
                     resolved_at: "now"
                 }
             });
+        });
+
+        it("only advances recovery for the endpoint that made the request", async () => {
+            queryMock.mockResolvedValueOnce({ rows: [] });
+
+            await checkLatency(PROJECT_ID, OTHER_ENDPOINT_ID, 500, true);
+
+            expect(queryMock).toHaveBeenCalledOnce();
+            expect(queryMock.mock.calls[0][0]).toContain("AND endpoint_id = $2");
+            expect(queryMock.mock.calls[0][1]).toEqual([
+                PROJECT_ID,
+                OTHER_ENDPOINT_ID,
+                1,
+                500
+            ]);
+            expect(broadcastMock).not.toHaveBeenCalled();
         });
 
         it("resets the healthy check counter when latency rises above the threshold", async () => {
@@ -366,20 +410,21 @@ describe("Incident service", () => {
                 }]
             });
 
-            await checkLatency("project-1", 1200, true);
+            await checkLatency(PROJECT_ID, ENDPOINT_ID, 1200, true);
 
             expect(queryMock).toHaveBeenCalledOnce();
             expect(queryMock.mock.calls[0][0]).toContain(
                 "healthy_checks = 0"
             );
             expect(queryMock.mock.calls[0][1]).toEqual([
-                "project-1",
+                PROJECT_ID,
+                ENDPOINT_ID,
                 1200
             ]);
 
             expect(broadcastMock).toHaveBeenCalledWith({
                 type: "incident_updated",
-                projectId: "project-1",
+                projectId: PROJECT_ID,
                 incident: {
                     id: "incident-2",
                     type: "HIGH_LATENCY",
@@ -399,11 +444,12 @@ describe("Incident service", () => {
                 }]
             });
 
-            await checkLatency("project-1", 500, false);
+            await checkLatency(PROJECT_ID, ENDPOINT_ID, 500, false);
 
             expect(queryMock).toHaveBeenCalledOnce();
             expect(queryMock.mock.calls[0][1]).toEqual([
-                "project-1",
+                PROJECT_ID,
+                ENDPOINT_ID,
                 0,
                 500
             ]);
@@ -413,7 +459,7 @@ describe("Incident service", () => {
 
             expect(broadcastMock).toHaveBeenCalledWith({
                 type: "incident_updated",
-                projectId: "project-1",
+                projectId: PROJECT_ID,
                 incident: {
                     id: "incident-2",
                     type: "HIGH_LATENCY",
@@ -428,40 +474,113 @@ describe("Incident service", () => {
                 })
             );
         });
+
     });
 
     describe("resolveErrorRateIncident", () => {
         it("does not resolve an incident while error rate remains high", async () => {
-            await resolveErrorRateIncident("project-1", 50);
+            await resolveErrorRateIncident(PROJECT_ID, ENDPOINT_ID, 50);
 
             expect(queryMock).not.toHaveBeenCalled();
             expect(broadcastMock).not.toHaveBeenCalled();
         });
 
-        it("does not resolve an incident when no active incident exists", async () => {
+        it("does not resolve an incident when the endpoint has no active incident", async () => {
             queryMock.mockResolvedValueOnce({ rows: [] });
 
-            await resolveErrorRateIncident("project-1", 10);
+            await resolveErrorRateIncident(PROJECT_ID, ENDPOINT_ID, 10);
 
             expect(queryMock).toHaveBeenCalledOnce();
+            expect(queryMock.mock.calls[0][1]).toEqual([
+                PROJECT_ID,
+                ENDPOINT_ID
+            ]);
             expect(broadcastMock).not.toHaveBeenCalled();
+        });
+
+        it("computes the error rate from the endpoint's recent requests when none is given", async () => {
+            queryMock
+                .mockResolvedValueOnce({
+                    rows: [{ total: 20, failed: 2 }]
+                })
+                .mockResolvedValueOnce({ rows: [] });
+
+            await resolveErrorRateIncident(PROJECT_ID, ENDPOINT_ID);
+
+            expect(queryMock).toHaveBeenCalledTimes(2);
+            expect(queryMock.mock.calls[0][1]).toEqual([
+                PROJECT_ID,
+                ENDPOINT_ID,
+                20
+            ]);
+            expect(queryMock.mock.calls[1][1]).toEqual([
+                PROJECT_ID,
+                ENDPOINT_ID
+            ]);
         });
     });
 
     describe("resolveLatencyIncident", () => {
         it("does not resolve an incident while latency remains high", async () => {
-            await resolveLatencyIncident("project-1", 1000);
+            await resolveLatencyIncident(PROJECT_ID, ENDPOINT_ID, 1000);
 
             expect(queryMock).not.toHaveBeenCalled();
             expect(broadcastMock).not.toHaveBeenCalled();
         });
 
-        it("does not resolve an incident when no active incident exists", async () => {
+        it("does not resolve an incident when the endpoint has no active incident", async () => {
             queryMock.mockResolvedValueOnce({ rows: [] });
 
-            await resolveLatencyIncident("project-1", 500);
+            await resolveLatencyIncident(PROJECT_ID, ENDPOINT_ID, 500);
 
             expect(queryMock).toHaveBeenCalledOnce();
+            expect(queryMock.mock.calls[0][1]).toEqual([
+                PROJECT_ID,
+                ENDPOINT_ID,
+                1,
+                500
+            ]);
+            expect(broadcastMock).not.toHaveBeenCalled();
+        });
+    });
+
+    describe("resolveEndpointIncidents", () => {
+        it("resolves every active incident of the endpoint and broadcasts each one", async () => {
+            const rows = [
+                { id: "incident-1", type: "HIGH_LATENCY", resolved_at: "now" },
+                { id: "incident-2", type: "HIGH_ERROR_RATE", resolved_at: "now" }
+            ];
+            queryMock.mockResolvedValueOnce({ rows });
+
+            const resolved = await resolveEndpointIncidents(PROJECT_ID, ENDPOINT_ID);
+
+            expect(queryMock).toHaveBeenCalledOnce();
+            const [sql, params] = queryMock.mock.calls[0];
+            expect(sql).toContain("UPDATE incidents");
+            expect(sql).toContain("SET resolved_at = NOW()");
+            expect(sql).toContain("WHERE project_id = $1");
+            expect(sql).toContain("AND endpoint_id = $2");
+            expect(sql).toContain("AND resolved_at IS NULL");
+            expect(sql).toContain("RETURNING *");
+            expect(params).toEqual([PROJECT_ID, ENDPOINT_ID]);
+
+            expect(resolved).toEqual(rows);
+            expect(broadcastMock).toHaveBeenCalledTimes(2);
+            for (const incident of rows) {
+                expect(broadcastMock).toHaveBeenCalledWith({
+                    type: "incident_resolved",
+                    projectId: PROJECT_ID,
+                    incident
+                });
+            }
+        });
+
+        it("does not broadcast when the endpoint has no active incidents", async () => {
+            queryMock.mockResolvedValueOnce({ rows: [] });
+
+            const resolved = await resolveEndpointIncidents(PROJECT_ID, ENDPOINT_ID);
+
+            expect(resolved).toEqual([]);
             expect(broadcastMock).not.toHaveBeenCalled();
         });
     });

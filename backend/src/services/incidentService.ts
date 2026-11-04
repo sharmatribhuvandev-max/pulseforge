@@ -11,7 +11,7 @@ const RECENT_REQUEST_LIMIT = 20;
  * ==========================================
  */
 
-async function getRecentRequestStats(projectId: string) {
+async function getRecentRequestStats(projectId: string, endpointId: string) {
     const result = await postgresPool.query(
         `
         SELECT
@@ -23,11 +23,12 @@ async function getRecentRequestStats(projectId: string) {
             SELECT error
             FROM api_requests
             WHERE project_id = $1
+              AND endpoint_id = $2
             ORDER BY created_at DESC, id DESC
-            LIMIT $2
+            LIMIT $3
         ) recent_requests
         `,
-        [projectId, RECENT_REQUEST_LIMIT]
+        [projectId, endpointId, RECENT_REQUEST_LIMIT]
     );
 
     return {
@@ -42,8 +43,8 @@ async function getRecentRequestStats(projectId: string) {
  * ==========================================
  */
 
-export async function checkErrorRate(projectId: string) {
-    const { total, failed } = await getRecentRequestStats(projectId);
+export async function checkErrorRate(projectId: string, endpointId: string) {
+    const { total, failed } = await getRecentRequestStats(projectId, endpointId);
 
     if (total === 0) {
         return;
@@ -55,13 +56,14 @@ export async function checkErrorRate(projectId: string) {
         const existing = await postgresPool.query(
             `
             UPDATE incidents
-            SET actual_value = $2
+            SET actual_value = $3
             WHERE project_id = $1
+              AND endpoint_id = $2
               AND type = 'HIGH_ERROR_RATE'
               AND resolved_at IS NULL
             RETURNING *
             `,
-            [projectId, errorRate]
+            [projectId, endpointId, errorRate]
         );
 
         if (existing.rows.length > 0) {
@@ -79,18 +81,20 @@ export async function checkErrorRate(projectId: string) {
             INSERT INTO incidents
             (
                 project_id,
+                endpoint_id,
                 type,
                 threshold,
                 actual_value
             )
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (project_id, type)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (project_id, endpoint_id, type)
             WHERE resolved_at IS NULL
             DO NOTHING
             RETURNING *
             `,
             [
                 projectId,
+                endpointId,
                 "HIGH_ERROR_RATE",
                 ERROR_RATE_THRESHOLD,
                 errorRate
@@ -115,7 +119,7 @@ export async function checkErrorRate(projectId: string) {
         return;
     }
 
-    await resolveErrorRateIncident(projectId, errorRate);
+    await resolveErrorRateIncident(projectId, endpointId, errorRate);
 }
 
 /*
@@ -126,6 +130,7 @@ export async function checkErrorRate(projectId: string) {
 
 export async function checkLatency(
     projectId: string,
+    endpointId: string,
     latency: number,
     requestSucceeded: boolean
 ) {
@@ -134,12 +139,13 @@ export async function checkLatency(
             `
             UPDATE incidents
             SET
-                actual_value = $2,
+                actual_value = $3,
                 healthy_checks = 0
             WHERE id = (
                 SELECT id
                 FROM incidents
                 WHERE project_id = $1
+                  AND endpoint_id = $2
                   AND type = 'HIGH_LATENCY'
                   AND resolved_at IS NULL
                 ORDER BY started_at DESC
@@ -148,7 +154,7 @@ export async function checkLatency(
               AND resolved_at IS NULL
             RETURNING *
             `,
-            [projectId, latency]
+            [projectId, endpointId, latency]
         );
 
         if (existing.rows.length > 0) {
@@ -166,19 +172,21 @@ export async function checkLatency(
             INSERT INTO incidents
             (
                 project_id,
+                endpoint_id,
                 type,
                 threshold,
                 actual_value,
                 healthy_checks
             )
-            VALUES ($1, $2, $3, $4, 0)
-            ON CONFLICT (project_id, type)
+            VALUES ($1, $2, $3, $4, $5, 0)
+            ON CONFLICT (project_id, endpoint_id, type)
             WHERE resolved_at IS NULL
             DO NOTHING
             RETURNING *
             `,
             [
                 projectId,
+                endpointId,
                 "HIGH_LATENCY",
                 LATENCY_THRESHOLD,
                 latency
@@ -201,7 +209,7 @@ export async function checkLatency(
         return;
     }
 
-    await resolveLatencyIncident(projectId, latency, requestSucceeded);
+    await resolveLatencyIncident(projectId, endpointId, latency, requestSucceeded);
 }
 
 /*
@@ -212,10 +220,11 @@ export async function checkLatency(
 
 export async function resolveErrorRateIncident(
     projectId: string,
+    endpointId: string,
     errorRate?: number
 ) {
     if (errorRate === undefined) {
-        const stats = await getRecentRequestStats(projectId);
+        const stats = await getRecentRequestStats(projectId, endpointId);
 
         if (stats.total === 0) {
             return;
@@ -233,11 +242,12 @@ export async function resolveErrorRateIncident(
         SELECT id
         FROM incidents
         WHERE project_id = $1
+          AND endpoint_id = $2
           AND type = 'HIGH_ERROR_RATE'
           AND resolved_at IS NULL
         LIMIT 1
         `,
-        [projectId]
+        [projectId, endpointId]
     );
 
     if (activeIncident.rows.length === 0) {
@@ -281,6 +291,7 @@ export async function resolveErrorRateIncident(
 
 export async function resolveLatencyIncident(
     projectId: string,
+    endpointId: string,
     latency: number,
     requestSucceeded: boolean = true
 ) {
@@ -295,12 +306,12 @@ export async function resolveLatencyIncident(
         UPDATE incidents
         SET
             healthy_checks = CASE
-                WHEN $2 = 1 THEN healthy_checks + 1
+                WHEN $3 = 1 THEN healthy_checks + 1
                 ELSE 0
             END,
-            actual_value = $3,
+            actual_value = $4,
             resolved_at = CASE
-                WHEN $2 = 1 AND healthy_checks + 1 >= 3
+                WHEN $3 = 1 AND healthy_checks + 1 >= 3
                     THEN NOW()
                 ELSE resolved_at
             END
@@ -308,6 +319,7 @@ export async function resolveLatencyIncident(
             SELECT id
             FROM incidents
             WHERE project_id = $1
+              AND endpoint_id = $2
               AND type = 'HIGH_LATENCY'
               AND resolved_at IS NULL
             ORDER BY started_at DESC
@@ -316,7 +328,7 @@ export async function resolveLatencyIncident(
           AND resolved_at IS NULL
         RETURNING *
         `,
-        [projectId, healthyIncrement, latency]
+        [projectId, endpointId, healthyIncrement, latency]
     );
 
     if (result.rows.length === 0) {
@@ -345,4 +357,40 @@ export async function resolveLatencyIncident(
         projectId,
         incident
     });
+}
+
+/*
+ * ==========================================
+ * RESOLVE ALL INCIDENTS OF AN ENDPOINT
+ * ==========================================
+ *
+ * Used when an endpoint is deleted. It receives no more checks,
+ * so its active incidents could otherwise never resolve.
+ */
+
+export async function resolveEndpointIncidents(
+    projectId: string,
+    endpointId: string
+) {
+    const result = await postgresPool.query(
+        `
+        UPDATE incidents
+        SET resolved_at = NOW()
+        WHERE project_id = $1
+          AND endpoint_id = $2
+          AND resolved_at IS NULL
+        RETURNING *
+        `,
+        [projectId, endpointId]
+    );
+
+    for (const incident of result.rows) {
+        broadcast({
+            type: "incident_resolved",
+            projectId,
+            incident
+        });
+    }
+
+    return result.rows;
 }

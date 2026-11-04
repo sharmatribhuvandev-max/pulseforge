@@ -5,6 +5,7 @@ import { Types } from "mongoose";
 import { Endpoint } from "../models/Endpoint";
 import { Project } from "../models/Project";
 import { AuthRequest } from "../middleware/authMiddleware";
+import { resolveEndpointIncidents } from "../services/incidentService";
 
 export async function createEndpoint(
     req: AuthRequest,
@@ -271,6 +272,21 @@ export async function deleteEndpoint(
         await Endpoint.deleteOne({
             _id: endpoint._id
         });
+
+        // A deleted endpoint gets no more checks, so close its active
+        // incidents. The endpoint is already gone, so a failure here is
+        // logged and does not turn a successful delete into an error.
+        try {
+            await resolveEndpointIncidents(
+                endpoint.projectId.toString(),
+                endpoint._id.toString()
+            );
+        } catch (error) {
+            console.error(
+                "Failed to resolve incidents for deleted endpoint:",
+                error
+            );
+        }
 
         return res.status(200).json({
             message: "Endpoint deleted successfully",

@@ -158,7 +158,7 @@ describe("checkApi controller", () => {
         await checkApi(mockRequest(ENDPOINT_ID, "user-1"), res);
 
         expect(monitorApi).toHaveBeenCalledOnce();
-        expect(monitorApi).toHaveBeenCalledWith(PROJECT_ID, URL, "GET", 0);
+        expect(monitorApi).toHaveBeenCalledWith(PROJECT_ID, ENDPOINT_ID, URL, "GET", 0);
 
         expect(checkErrorRate).not.toHaveBeenCalled();
         expect(checkLatency).not.toHaveBeenCalled();
@@ -191,7 +191,7 @@ describe("checkApi controller", () => {
         await checkApi(mockRequest(ENDPOINT_ID, "user-1"), res);
 
         expect(applyLatency).toHaveBeenCalledWith(1500);
-        expect(monitorApi).toHaveBeenCalledWith(PROJECT_ID, URL, "GET", 1500);
+        expect(monitorApi).toHaveBeenCalledWith(PROJECT_ID, ENDPOINT_ID, URL, "GET", 1500);
         expect(checkErrorRate).not.toHaveBeenCalled();
         expect(checkLatency).not.toHaveBeenCalled();
         expect(res.status).toHaveBeenCalledWith(200);
@@ -221,6 +221,7 @@ describe("checkApi controller", () => {
             unknown[],
         ];
         expect(sql).toContain("INSERT INTO api_requests");
+        expect(sql).toContain("endpoint_id");
         expect(values).toEqual([
             PROJECT_ID,
             URL,
@@ -228,11 +229,13 @@ describe("checkApi controller", () => {
             503,
             expect.any(Number),
             true,
+            ENDPOINT_ID,
         ]);
 
-        expect(checkErrorRate).toHaveBeenCalledWith(PROJECT_ID);
+        expect(checkErrorRate).toHaveBeenCalledWith(PROJECT_ID, ENDPOINT_ID);
         expect(checkLatency).toHaveBeenCalledWith(
             PROJECT_ID,
+            ENDPOINT_ID,
             expect.any(Number),
             false
         );

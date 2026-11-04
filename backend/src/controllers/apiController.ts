@@ -85,13 +85,14 @@ export const checkApi = async (
         }
 
         const projectId = project._id.toString();
+        const monitoredEndpointId = endpoint._id.toString();
 
         /*
          * FIND ACTIVE CHAOS RULE
          */
 
         const chaosRule = await getActiveChaosRule(
-            endpoint._id.toString()
+            monitoredEndpointId
         );
 
         /*
@@ -123,9 +124,10 @@ export const checkApi = async (
                         method,
                         status_code,
                         latency_ms,
-                        error
+                        error,
+                        endpoint_id
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
                     `,
                     [
                         projectId,
@@ -133,7 +135,8 @@ export const checkApi = async (
                         endpoint.method,
                         chaosRule.statusCode,
                         totalLatency,
-                        true
+                        true,
+                        monitoredEndpointId
                     ]
                 );
 
@@ -144,8 +147,13 @@ export const checkApi = async (
                  * toward consecutive healthy latency checks.
                  */
 
-                await checkErrorRate(projectId);
-                await checkLatency(projectId, totalLatency, false);
+                await checkErrorRate(projectId, monitoredEndpointId);
+                await checkLatency(
+                    projectId,
+                    monitoredEndpointId,
+                    totalLatency,
+                    false
+                );
 
                 /*
                  * BROADCAST CHAOS EVENT
@@ -154,7 +162,7 @@ export const checkApi = async (
                 broadcast({
                     type: "chaos_event",
                     projectId,
-                    endpointId: endpoint._id.toString(),
+                    endpointId: monitoredEndpointId,
                     endpoint: endpoint.url,
                     method: endpoint.method,
                     statusCode: chaosRule.statusCode,
@@ -189,6 +197,7 @@ export const checkApi = async (
 
         const monitorResult = await monitorApi(
             projectId,
+            monitoredEndpointId,
             endpoint.url,
             endpoint.method,
             chaosLatency

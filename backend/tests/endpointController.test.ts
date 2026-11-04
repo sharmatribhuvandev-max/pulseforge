@@ -12,12 +12,14 @@ const {
     endpointFindByIdMock,
     endpointDeleteOneMock,
     projectFindOneMock,
+    resolveEndpointIncidentsMock,
 } = vi.hoisted(() => ({
     endpointCreateMock: vi.fn(),
     endpointFindMock: vi.fn(),
     endpointFindByIdMock: vi.fn(),
     endpointDeleteOneMock: vi.fn(),
     projectFindOneMock: vi.fn(),
+    resolveEndpointIncidentsMock: vi.fn(),
 }));
 
 vi.mock("../src/models/Endpoint", () => ({
@@ -33,6 +35,10 @@ vi.mock("../src/models/Project", () => ({
     Project: {
         findOne: projectFindOneMock,
     },
+}));
+
+vi.mock("../src/services/incidentService", () => ({
+    resolveEndpointIncidents: resolveEndpointIncidentsMock,
 }));
 
 import {
@@ -504,6 +510,7 @@ describe("endpointController", () => {
                 error: "ENDPOINT_NOT_FOUND",
             });
             expect(endpointDeleteOneMock).not.toHaveBeenCalled();
+            expect(resolveEndpointIncidentsMock).not.toHaveBeenCalled();
         });
 
         it("deletes an endpoint belonging to the authenticated user's project", async () => {
@@ -536,6 +543,44 @@ describe("endpointController", () => {
                 message: "Endpoint deleted successfully",
                 endpointId: ENDPOINT_ID,
             });
+        });
+
+        it("resolves the deleted endpoint's active incidents after deleting it", async () => {
+            endpointFindByIdMock.mockResolvedValue({ _id: ENDPOINT_ID, projectId: PROJECT_ID });
+            projectFindOneMock.mockResolvedValue({ _id: PROJECT_ID });
+            endpointDeleteOneMock.mockResolvedValue({ deletedCount: 1 });
+            resolveEndpointIncidentsMock.mockResolvedValue([]);
+
+            const res = makeResponse();
+            await deleteEndpoint(makeRequest({ params: { endpointId: ENDPOINT_ID } }), res);
+
+            expect(resolveEndpointIncidentsMock).toHaveBeenCalledWith(PROJECT_ID, ENDPOINT_ID);
+            expect(endpointDeleteOneMock.mock.invocationCallOrder[0]).toBeLessThan(
+                resolveEndpointIncidentsMock.mock.invocationCallOrder[0]
+            );
+            expect(res.status).toHaveBeenCalledWith(200);
+        });
+
+        it("still reports success when resolving incidents fails after the endpoint was deleted", async () => {
+            endpointFindByIdMock.mockResolvedValue({ _id: ENDPOINT_ID, projectId: PROJECT_ID });
+            projectFindOneMock.mockResolvedValue({ _id: PROJECT_ID });
+            endpointDeleteOneMock.mockResolvedValue({ deletedCount: 1 });
+            const failure = new Error("Postgres unavailable");
+            resolveEndpointIncidentsMock.mockRejectedValue(failure);
+            const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+            const res = makeResponse();
+            await deleteEndpoint(makeRequest({ params: { endpointId: ENDPOINT_ID } }), res);
+
+            expect(res.status).toHaveBeenCalledWith(200);
+            expect(res.json).toHaveBeenCalledWith({
+                message: "Endpoint deleted successfully",
+                endpointId: ENDPOINT_ID,
+            });
+            expect(errorSpy).toHaveBeenCalledWith(
+                "Failed to resolve incidents for deleted endpoint:",
+                failure
+            );
         });
     });
 });

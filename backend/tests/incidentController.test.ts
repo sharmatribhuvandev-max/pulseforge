@@ -131,6 +131,15 @@ describe("incidentController", () => {
         });
     });
 
+    it("returns the endpoint of each incident", async () => {
+        findOneMock.mockResolvedValue({ _id: PROJECT_ID, userId: "user-123" });
+        queryMock.mockResolvedValue({ rows: [] });
+
+        await getProjectIncidents(makeRequest(), makeResponse());
+
+        expect(queryMock.mock.calls[0][0]).toMatch(/\bendpoint_id\b/);
+    });
+
     it("returns a generic error when PostgreSQL fails", async () => {
         const errorSpy = vi
             .spyOn(console, "error")

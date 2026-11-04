@@ -49,6 +49,8 @@ vi.mock("../src/services/incidentService", () => ({
 
 import { monitorApi } from "../src/services/monitorService";
 
+const ENDPOINT_ID = "endpoint-1";
+
 describe("Monitor service", () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -68,6 +70,7 @@ describe("Monitor service", () => {
 
         const result = await monitorApi(
             "project-1",
+            ENDPOINT_ID,
             "https://example.com/health",
             "GET"
         );
@@ -82,12 +85,14 @@ describe("Monitor service", () => {
         const [sql, values] = queryMock.mock.calls[0];
 
         expect(sql).toContain("INSERT INTO api_requests");
+        expect(sql).toContain("endpoint_id");
         expect(values[0]).toBe("project-1");
         expect(values[1]).toBe("https://example.com/health");
         expect(values[2]).toBe("GET");
         expect(values[3]).toBe(200);
         expect(values[4]).toEqual(expect.any(Number));
         expect(values[5]).toBe(false);
+        expect(values[6]).toBe(ENDPOINT_ID);
 
         expect(result).toEqual({
             requestId: 123,
@@ -96,9 +101,10 @@ describe("Monitor service", () => {
             success: true
         });
 
-        expect(resolveErrorRateIncidentMock).toHaveBeenCalledWith("project-1");
+        expect(resolveErrorRateIncidentMock).toHaveBeenCalledWith("project-1", ENDPOINT_ID);
         expect(checkLatencyMock).toHaveBeenCalledWith(
             "project-1",
+            ENDPOINT_ID,
             result.latency,
             true
         );
@@ -108,6 +114,7 @@ describe("Monitor service", () => {
                 type: "api_request",
                 requestId: 123,
                 projectId: "project-1",
+                endpointId: ENDPOINT_ID,
                 statusCode: 200,
                 success: true,
                 chaos: false
@@ -120,6 +127,7 @@ describe("Monitor service", () => {
 
         const result = await monitorApi(
             "project-1",
+            ENDPOINT_ID,
             "https://example.com/health",
             "GET",
             500
@@ -132,6 +140,7 @@ describe("Monitor service", () => {
 
         expect(checkLatencyMock).toHaveBeenCalledWith(
             "project-1",
+            ENDPOINT_ID,
             result.latency,
             true
         );
@@ -148,6 +157,7 @@ describe("Monitor service", () => {
 
         const result = await monitorApi(
             "project-1",
+            ENDPOINT_ID,
             "https://example.com/missing",
             "GET"
         );
@@ -155,13 +165,16 @@ describe("Monitor service", () => {
         expect(result.success).toBe(false);
         expect(result.statusCode).toBe(404);
 
+        expect(queryMock.mock.calls[0][0]).toContain("endpoint_id");
         expect(queryMock.mock.calls[0][1][3]).toBe(404);
         expect(queryMock.mock.calls[0][1][5]).toBe(true);
+        expect(queryMock.mock.calls[0][1][6]).toBe(ENDPOINT_ID);
 
-        expect(checkErrorRateMock).toHaveBeenCalledWith("project-1");
+        expect(checkErrorRateMock).toHaveBeenCalledWith("project-1", ENDPOINT_ID);
 
         expect(checkLatencyMock).toHaveBeenCalledWith(
             "project-1",
+            ENDPOINT_ID,
             result.latency,
             false
         );
@@ -169,6 +182,7 @@ describe("Monitor service", () => {
         expect(broadcastMock).toHaveBeenCalledWith(
             expect.objectContaining({
                 type: "api_request",
+                endpointId: ENDPOINT_ID,
                 statusCode: 404,
                 success: false,
                 errorType: "HTTP_ERROR"
@@ -181,6 +195,7 @@ describe("Monitor service", () => {
 
         const result = await monitorApi(
             "project-1",
+            ENDPOINT_ID,
             "https://example.com/health",
             "GET"
         );
@@ -193,9 +208,10 @@ describe("Monitor service", () => {
         expect(values[3]).toBe(500);
         expect(values[5]).toBe(true);
 
-        expect(checkErrorRateMock).toHaveBeenCalledWith("project-1");
+        expect(checkErrorRateMock).toHaveBeenCalledWith("project-1", ENDPOINT_ID);
         expect(checkLatencyMock).toHaveBeenCalledWith(
             "project-1",
+            ENDPOINT_ID,
             result.latency,
             false
         );
@@ -217,6 +233,7 @@ describe("Monitor service", () => {
 
         const result = await monitorApi(
             "project-1",
+            ENDPOINT_ID,
             "https://unreachable.example",
             "GET"
         );
@@ -226,9 +243,10 @@ describe("Monitor service", () => {
         expect(queryMock.mock.calls[0][1][3]).toBe(502);
         expect(queryMock.mock.calls[0][1][5]).toBe(true);
 
-        expect(checkErrorRateMock).toHaveBeenCalledWith("project-1");
+        expect(checkErrorRateMock).toHaveBeenCalledWith("project-1", ENDPOINT_ID);
         expect(checkLatencyMock).toHaveBeenCalledWith(
             "project-1",
+            ENDPOINT_ID,
             result.latency,
             false
         );
@@ -250,6 +268,7 @@ describe("Monitor service", () => {
 
         const result = await monitorApi(
             "project-1",
+            ENDPOINT_ID,
             "https://slow.example",
             "GET"
         );
@@ -260,6 +279,7 @@ describe("Monitor service", () => {
 
         expect(checkLatencyMock).toHaveBeenCalledWith(
             "project-1",
+            ENDPOINT_ID,
             result.latency,
             false
         );
@@ -281,6 +301,7 @@ describe("Monitor service", () => {
 
         const result = await monitorApi(
             "project-1",
+            ENDPOINT_ID,
             "https://unreachable.example",
             "POST",
             250
@@ -289,6 +310,7 @@ describe("Monitor service", () => {
         expect(checkLatencyMock).toHaveBeenCalledOnce();
         expect(checkLatencyMock).toHaveBeenCalledWith(
             "project-1",
+            ENDPOINT_ID,
             result.latency,
             false
         );
@@ -303,6 +325,7 @@ describe("Monitor service", () => {
 
         const result = await monitorApi(
             "project-1",
+            ENDPOINT_ID,
             "http://127.0.0.1/health",
             "GET"
         );
@@ -318,6 +341,7 @@ describe("Monitor service", () => {
 
         expect(checkLatencyMock).toHaveBeenCalledWith(
             "project-1",
+            ENDPOINT_ID,
             result.latency,
             false
         );
@@ -339,7 +363,7 @@ describe("Monitor service", () => {
         );
 
         await expect(
-            monitorApi("project-1", "https://example.com/health", "GET")
+            monitorApi("project-1", ENDPOINT_ID, "https://example.com/health", "GET")
         ).rejects.toThrow("Incident check unavailable");
 
         // Only the healthy request is stored; no second failed row.
@@ -351,6 +375,7 @@ describe("Monitor service", () => {
         expect(checkLatencyMock).toHaveBeenCalledOnce();
         expect(checkLatencyMock).toHaveBeenCalledWith(
             "project-1",
+            ENDPOINT_ID,
             expect.any(Number),
             true
         );
@@ -362,7 +387,7 @@ describe("Monitor service", () => {
         queryMock.mockRejectedValueOnce(new Error("Database unavailable"));
 
         await expect(
-            monitorApi("project-1", "https://example.com/health", "GET")
+            monitorApi("project-1", ENDPOINT_ID, "https://example.com/health", "GET")
         ).rejects.toThrow("Database unavailable");
 
         expect(queryMock).toHaveBeenCalledOnce();

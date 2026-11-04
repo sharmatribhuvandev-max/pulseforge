@@ -38,6 +38,7 @@ class UnexpectedHttpStatusError extends Error {
 
 const recordFailedRequest = async (
     projectId: string,
+    endpointId: string,
     url: string,
     method: string,
     additionalLatency: number,
@@ -93,26 +94,28 @@ const recordFailedRequest = async (
             method,
             status_code,
             latency_ms,
-            error
+            error,
+            endpoint_id
         )
-        VALUES ($1, $2, $3, $4, $5, $6)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id
         `,
-        [projectId, url, method, statusCode, latency, true]
+        [projectId, url, method, statusCode, latency, true, endpointId]
     );
 
     const requestId = savedRequest.rows[0].id;
 
-    await checkErrorRate(projectId);
+    await checkErrorRate(projectId, endpointId);
 
     // A failed request breaks the consecutive-healthy streak.
     // High latency also resets recovery, regardless of success.
-    await checkLatency(projectId, latency, false);
+    await checkLatency(projectId, endpointId, latency, false);
 
     broadcast({
         type: "api_request",
         requestId,
         projectId,
+        endpointId,
         endpoint: url,
         method,
         statusCode,
@@ -133,6 +136,7 @@ const recordFailedRequest = async (
 
 export const monitorApi = async (
     projectId: string,
+    endpointId: string,
     url: string,
     method: string,
     additionalLatency: number = 0
@@ -156,6 +160,7 @@ export const monitorApi = async (
     } catch (error: unknown) {
         return recordFailedRequest(
             projectId,
+            endpointId,
             url,
             method,
             additionalLatency,
@@ -168,6 +173,7 @@ export const monitorApi = async (
     if (response.status < 200 || response.status >= 300) {
         return recordFailedRequest(
             projectId,
+            endpointId,
             url,
             method,
             additionalLatency,
@@ -188,25 +194,27 @@ export const monitorApi = async (
             method,
             status_code,
             latency_ms,
-            error
+            error,
+            endpoint_id
         )
-        VALUES ($1, $2, $3, $4, $5, $6)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id
         `,
-        [projectId, url, method, response.status, latency, false]
+        [projectId, url, method, response.status, latency, false, endpointId]
     );
 
     const requestId = savedRequest.rows[0].id;
 
-    await resolveErrorRateIncident(projectId);
+    await resolveErrorRateIncident(projectId, endpointId);
 
     // Only a successful request below the threshold advances recovery.
-    await checkLatency(projectId, latency, true);
+    await checkLatency(projectId, endpointId, latency, true);
 
     broadcast({
         type: "api_request",
         requestId,
         projectId,
+        endpointId,
         endpoint: url,
         method,
         statusCode: response.status,

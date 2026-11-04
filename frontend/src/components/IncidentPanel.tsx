@@ -1,14 +1,18 @@
 
 import type { Incident } from "../services/projectService";
+import type { Endpoint } from "../services/endpointService";
+import { incidentEndpointLabel } from "./incidentEndpointLabel";
 
 interface IncidentPanelProps {
     activeIncidents: Incident[];
     resolvedIncidents: Incident[];
+    endpoints: Endpoint[];
 }
 
 function IncidentPanel({
     activeIncidents,
     resolvedIncidents,
+    endpoints,
 }: IncidentPanelProps) {
     const formatType = (type: string) => {
         return type
@@ -78,6 +82,10 @@ function IncidentPanel({
                                             {formatType(incident.type)}
                                         </h3>
 
+                                        <p className="text-sm text-slate-400 mt-1 break-all">
+                                            {incidentEndpointLabel(incident, endpoints)}
+                                        </p>
+
                                         <p className="text-sm text-slate-500 mt-1">
                                             Started:{" "}
                                             {new Date(
@@ -146,6 +154,10 @@ function IncidentPanel({
                                         <h3 className="text-slate-300 font-semibold">
                                             {formatType(incident.type)}
                                         </h3>
+
+                                        <p className="text-sm text-slate-400 mt-1 break-all">
+                                            {incidentEndpointLabel(incident, endpoints)}
+                                        </p>
 
                                         <p className="text-sm text-slate-500 mt-1">
                                             Started:{" "}

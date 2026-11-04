@@ -943,6 +943,10 @@ function Dashboard() {
                                                     projectResolvedIncidents
                                                 }
 
+                                                endpoints={
+                                                    endpoints
+                                                }
+
                                             />
 
 

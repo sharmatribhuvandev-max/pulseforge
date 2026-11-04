@@ -9,6 +9,7 @@ import {
 export interface Incident {
     id: number | string;
     project_id: string;
+    endpoint_id?: string | null;
     type: string;
     threshold: number | string;
     actual_value: number | string;

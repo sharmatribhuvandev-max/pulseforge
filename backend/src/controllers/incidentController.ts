@@ -43,6 +43,7 @@ export const getProjectIncidents = async (
             SELECT
                 id,
                 project_id,
+                endpoint_id,
                 type,
                 threshold,
                 actual_value,

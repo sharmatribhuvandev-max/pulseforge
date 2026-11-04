@@ -166,6 +166,7 @@ export interface ProjectIncidents {
 export interface Incident {
     id: string;
     project_id: string;
+    endpoint_id?: string | null;
     type: string;
     threshold: number | string;
     actual_value: number | string;
