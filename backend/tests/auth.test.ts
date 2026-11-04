@@ -86,11 +86,11 @@ describe("PulseForge authentication", () => {
             });
         });
 
-        it("rejects passwords shorter than six characters", async () => {
+        it("rejects passwords shorter than eight characters", async () => {
             const req = createRequest({
                 name: "Test User",
                 email: "test@example.com",
-                password: "12345"
+                password: "1234567"
             });
             const res = createResponse();
 
@@ -98,8 +98,31 @@ describe("PulseForge authentication", () => {
 
             expect(res.status).toHaveBeenCalledWith(400);
             expect(res.json).toHaveBeenCalledWith({
-                message: "Password must be at least 6 characters"
+                message: "Password must be at least 8 characters"
             });
+            expect(User.create).not.toHaveBeenCalled();
+        });
+
+        it("characterization: accepts a password of exactly eight characters", async () => {
+            vi.mocked(User.findOne).mockResolvedValue(null as never);
+            vi.mocked(hashPassword).mockResolvedValue("hashed-password");
+            vi.mocked(User.create).mockResolvedValue({
+                _id: { toString: () => "user-123" },
+                name: "Test User",
+                email: "test@example.com"
+            } as never);
+
+            const req = createRequest({
+                name: "Test User",
+                email: "test@example.com",
+                password: "12345678"
+            });
+            const res = createResponse();
+
+            await signup(req, res);
+
+            expect(hashPassword).toHaveBeenCalledWith("12345678");
+            expect(res.status).toHaveBeenCalledWith(201);
         });
 
         it("rejects an existing user", async () => {
@@ -348,6 +371,31 @@ describe("PulseForge authentication", () => {
                 name: "Test User",
                 email: "test@example.com"
             });
+        });
+
+        it("characterization: still signs in a user whose existing password is six characters", async () => {
+            vi.mocked(User.findOne).mockResolvedValue({
+                _id: { toString: () => "user-123" },
+                name: "Test User",
+                email: "test@example.com",
+                passwordHash: "hashed-password"
+            } as never);
+
+            vi.mocked(comparePassword).mockResolvedValue(true);
+
+            const req = createRequest({
+                email: "test@example.com",
+                password: "123456"
+            });
+            const res = createResponse();
+
+            await signin(req, res);
+
+            expect(comparePassword).toHaveBeenCalledWith(
+                "123456",
+                "hashed-password"
+            );
+            expect(res.status).toHaveBeenCalledWith(200);
         });
     });
 

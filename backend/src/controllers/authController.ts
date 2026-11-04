@@ -6,7 +6,7 @@ import { generateToken } from "../utils/jwt";
 
 const MAX_NAME_LENGTH = 80;
 const MAX_EMAIL_LENGTH = 254;
-const MIN_PASSWORD_LENGTH = 6;
+const MIN_PASSWORD_LENGTH = 8;
 const MAX_PASSWORD_BYTES = 72;
 
 function isValidEmail(email: string): boolean {

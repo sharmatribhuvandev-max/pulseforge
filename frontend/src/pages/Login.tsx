@@ -151,7 +151,7 @@ function Login() {
                             onChange={(event) =>
                                 setPassword(event.target.value)
                             }
-                            minLength={isSignup ? 6 : undefined}
+                            minLength={isSignup ? 8 : undefined}
                             required
                             autoComplete={
                                 isSignup
@@ -161,7 +161,7 @@ function Login() {
                             className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 outline-none focus:border-blue-500"
                             placeholder={
                                 isSignup
-                                    ? "Create a password (min. 6 characters)"
+                                    ? "Create a password (min. 8 characters)"
                                     : "Enter your password"
                             }
                         />
