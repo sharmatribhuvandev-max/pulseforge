@@ -564,6 +564,9 @@ where it shows one.
 - **WebSocket idle timeout on Render is not published.** The 30 s heartbeat
   follows Render's keepalive advice, but whether it is short enough has not
   been tested on a deployed service.
+- **Slow-client limit not measured against a real stalled reader.** The
+  tests stub `bufferedAmount` on a real connection; the 1 MiB cut-off has
+  not been observed with a peer that actually stops reading.
 
 **Monitoring accuracy**
 
