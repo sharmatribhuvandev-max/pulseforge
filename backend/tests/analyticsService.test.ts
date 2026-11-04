@@ -179,7 +179,7 @@ describe("Analytics service", () => {
         });
     });
 
-    
+
     describe("getLatencyHistory", () => {
         it("converts latency and status values to numbers", async () => {
             queryMock.mockResolvedValueOnce({
