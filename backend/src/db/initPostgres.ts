@@ -12,7 +12,7 @@ export async function initPostgres() {
             request_size INT,
             response_size INT,
             error BOOLEAN DEFAULT FALSE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
     `);
 
@@ -23,9 +23,46 @@ export async function initPostgres() {
             type VARCHAR(100) NOT NULL,
             threshold NUMERIC,
             actual_value NUMERIC,
-            started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            resolved_at TIMESTAMP
+            started_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            resolved_at TIMESTAMPTZ
         );
+    `);
+
+    // Timestamps are moments in time. Older databases created these columns
+    // as "timestamp without time zone", holding the database's own clock time
+    // (CURRENT_TIMESTAMP / NOW() in the session time zone). Convert each one
+    // once, reading the old values in that same time zone.
+    await postgresPool.query(`
+        DO $$
+        BEGIN
+            IF (SELECT data_type FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'api_requests' AND column_name = 'created_at')
+                = 'timestamp without time zone' THEN
+                ALTER TABLE api_requests
+                ALTER COLUMN created_at TYPE TIMESTAMPTZ
+                USING created_at AT TIME ZONE current_setting('TimeZone');
+            END IF;
+
+            IF (SELECT data_type FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'incidents' AND column_name = 'started_at')
+                = 'timestamp without time zone' THEN
+                ALTER TABLE incidents
+                ALTER COLUMN started_at TYPE TIMESTAMPTZ
+                USING started_at AT TIME ZONE current_setting('TimeZone');
+            END IF;
+
+            IF (SELECT data_type FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'incidents' AND column_name = 'resolved_at')
+                = 'timestamp without time zone' THEN
+                ALTER TABLE incidents
+                ALTER COLUMN resolved_at TYPE TIMESTAMPTZ
+                USING resolved_at AT TIME ZONE current_setting('TimeZone');
+            END IF;
+        END
+        $$;
     `);
 
     // Add the recovery counter to existing databases without losing incidents.

@@ -56,6 +56,40 @@ describe("initPostgres", () => {
         logSpy = vi.spyOn(console, "log").mockImplementation(() => { });
     });
 
+    it("creates new tables with timestamptz columns", async () => {
+        await initPostgres();
+
+        const createRequests = statements()[positionOf(/^CREATE TABLE IF NOT EXISTS api_requests\b/)];
+        const createIncidents = statements()[positionOf(/^CREATE TABLE IF NOT EXISTS incidents\b/)];
+
+        expect(createRequests).toContain("created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP");
+        expect(createIncidents).toContain("started_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP");
+        expect(createIncidents).toContain("resolved_at TIMESTAMPTZ");
+        expect(createRequests + createIncidents).not.toMatch(/\bTIMESTAMP\b(?!TZ)/);
+    });
+
+    it.each([
+        ["api_requests", "created_at"],
+        ["incidents", "started_at"],
+        ["incidents", "resolved_at"],
+    ])("converts existing %s.%s to timestamptz only while it is still a plain timestamp", async (table, column) => {
+        await initPostgres();
+
+        const conversion = statements()[positionOf(/^DO \$\$/)];
+
+        expect(conversion).toContain(`table_name = '${table}' AND column_name = '${column}'`);
+        expect(conversion).toContain("'timestamp without time zone'");
+        expect(conversion).toContain(
+            `ALTER TABLE ${table} ALTER COLUMN ${column} TYPE TIMESTAMPTZ USING ${column} AT TIME ZONE current_setting('TimeZone')`
+        );
+    });
+
+    it("converts timestamp columns after the tables exist", async () => {
+        await initPostgres();
+
+        expect(positionOf(/^CREATE TABLE IF NOT EXISTS incidents\b/)).toBeLessThan(positionOf(/^DO \$\$/));
+    });
+
     it("adds a nullable endpoint_id column to api_requests and incidents", async () => {
         await initPostgres();
 
