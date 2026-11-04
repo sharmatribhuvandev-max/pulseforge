@@ -14,6 +14,72 @@ const authorizedProjects = new WeakMap<WebSocket, Set<string>>();
 // connection opened can be authorized for it without reconnecting.
 const connectionUsers = new WeakMap<WebSocket, string>();
 
+const DEFAULT_MAX_CONNECTIONS_PER_USER = 5;
+
+let maxConnectionsPerUser = DEFAULT_MAX_CONNECTIONS_PER_USER;
+
+// Open connections plus upgrades still in flight, per user. A new Map is
+// created on every init, and each release function keeps the Map it counted in.
+let userConnectionCounts = new Map<string, number>();
+
+const DEFAULT_MAX_TOTAL_CONNECTIONS = 1000;
+
+let maxTotalConnections = DEFAULT_MAX_TOTAL_CONNECTIONS;
+
+// Open connections plus upgrades still in flight, across all users. Like the
+// per-user counts, this is recreated on every init.
+let totalConnections = { count: 0 };
+
+function reserveTotalSlot(): (() => void) | undefined {
+    const total = totalConnections;
+
+    if (total.count >= maxTotalConnections) {
+        return undefined;
+    }
+
+    total.count += 1;
+
+    let released = false;
+
+    return () => {
+        if (released) {
+            return;
+        }
+
+        released = true;
+        total.count = Math.max(0, total.count - 1);
+    };
+}
+
+function reserveUserSlot(userId: string): (() => void) | undefined {
+    const counts = userConnectionCounts;
+    const current = counts.get(userId) ?? 0;
+
+    if (current >= maxConnectionsPerUser) {
+        return undefined;
+    }
+
+    counts.set(userId, current + 1);
+
+    let released = false;
+
+    return () => {
+        if (released) {
+            return;
+        }
+
+        released = true;
+
+        const remaining = (counts.get(userId) ?? 1) - 1;
+
+        if (remaining <= 0) {
+            counts.delete(userId);
+        } else {
+            counts.set(userId, remaining);
+        }
+    };
+}
+
 function rejectUpgrade(socket: Duplex, status: number, message: string): void {
     if (socket.destroyed) {
         return;
@@ -21,6 +87,7 @@ function rejectUpgrade(socket: Duplex, status: number, message: string): void {
 
     const reason = status === 401 ? "Unauthorized" :
         status === 403 ? "Forbidden" :
+        status === 429 ? "Too Many Requests" :
         status === 503 ? "Service Unavailable" :
         "Bad Request";
 
@@ -47,6 +114,8 @@ async function handleUpgrade(
         socket.destroy();
     });
 
+    let releaseSlot: () => void = () => undefined;
+
     try {
         const origin = request.headers.origin;
 
@@ -70,12 +139,40 @@ async function handleUpgrade(
             return;
         }
 
+        const releaseTotalSlot = reserveTotalSlot();
+
+        if (!releaseTotalSlot) {
+            rejectUpgrade(socket, 503, "WebSocket server at capacity");
+            return;
+        }
+
+        // Free the total slot when the underlying socket closes, however it ends.
+        releaseSlot = releaseTotalSlot;
+        socket.once("close", releaseTotalSlot);
+
         const userId = consumeWebSocketTicket(tickets[0]!);
 
         if (!userId) {
+            releaseSlot();
             rejectUpgrade(socket, 401, "Invalid or expired WebSocket ticket");
             return;
         }
+
+        const releaseUserSlot = reserveUserSlot(userId);
+
+        if (!releaseUserSlot) {
+            releaseSlot();
+            rejectUpgrade(socket, 429, "Too many WebSocket connections");
+            return;
+        }
+
+        // Free the slot when the underlying socket closes, however it ends.
+        const releaseTotalOnly = releaseSlot;
+        releaseSlot = () => {
+            releaseUserSlot();
+            releaseTotalOnly();
+        };
+        socket.once("close", releaseUserSlot);
 
         // Resolve project ownership before accepting the connection.
         const projects = await Project.find({ userId }).select("_id").lean();
@@ -89,6 +186,7 @@ async function handleUpgrade(
         );
 
         if (!wss) {
+            releaseSlot();
             rejectUpgrade(socket, 503, "WebSocket service unavailable");
             return;
         }
@@ -99,15 +197,112 @@ async function handleUpgrade(
             wss?.emit("connection", client, request);
         });
     } catch (error) {
+        releaseSlot();
         console.error("WebSocket upgrade failed:", error);
         rejectUpgrade(socket, 503, "WebSocket connection unavailable");
     }
 }
 
-export function initWebSocket(server: Server): void {
+// A client with more than this many bytes queued unsent is too slow to keep.
+const DEFAULT_MAX_BUFFERED_BYTES = 1024 * 1024;
+
+let maxBufferedBytes = DEFAULT_MAX_BUFFERED_BYTES;
+
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
+
+// A client stays alive until a heartbeat finds it silent for a full interval.
+const clientAlive = new WeakMap<WebSocket, boolean>();
+
+let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+
+function stopHeartbeat(): void {
+    if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = undefined;
+    }
+}
+
+function startHeartbeat(intervalMs: number): void {
+    stopHeartbeat();
+
+    heartbeatTimer = setInterval(() => {
+        if (!wss) {
+            return;
+        }
+
+        for (const client of wss.clients) {
+            if (clientAlive.get(client) === false) {
+                client.terminate();
+                continue;
+            }
+
+            clientAlive.set(client, false);
+
+            if (client.readyState === WebSocket.OPEN) {
+                client.ping();
+            }
+        }
+    }, intervalMs);
+
+    // The heartbeat must never keep the process alive on its own.
+    heartbeatTimer.unref();
+}
+
+function closeWebSocketServer(target: WebSocketServer | undefined): void {
+    if (!target) {
+        return;
+    }
+
+    // Only clear shared state if this is still the current server.
+    if (wss === target) {
+        stopHeartbeat();
+        wss = undefined;
+    }
+
+    for (const client of target.clients) {
+        client.terminate();
+    }
+
+    target.close();
+}
+
+export function closeWebSocket(): void {
+    closeWebSocketServer(wss);
+}
+
+export interface WebSocketLimits {
+    maxConnectionsPerUser?: number;
+    maxTotalConnections?: number;
+    heartbeatIntervalMs?: number;
+    maxBufferedBytes?: number;
+}
+
+export function initWebSocket(
+    server: Server,
+    limits: WebSocketLimits = {},
+): void {
+    maxConnectionsPerUser =
+        limits.maxConnectionsPerUser ?? DEFAULT_MAX_CONNECTIONS_PER_USER;
+    userConnectionCounts = new Map();
+    maxTotalConnections =
+        limits.maxTotalConnections ?? DEFAULT_MAX_TOTAL_CONNECTIONS;
+    totalConnections = { count: 0 };
+
+    maxBufferedBytes =
+        limits.maxBufferedBytes ?? DEFAULT_MAX_BUFFERED_BYTES;
+
+    startHeartbeat(
+        limits.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS,
+    );
     wss = new WebSocketServer({
         noServer: true,
         maxPayload: 64 * 1024,
+    });
+
+    const createdWss: WebSocketServer | undefined = wss;
+
+    server.once("close", () => {
+        closeWebSocketServer(createdWss);
     });
 
     server.on("upgrade", (request, socket, head) => {
@@ -115,6 +310,12 @@ export function initWebSocket(server: Server): void {
     });
 
     wss.on("connection", (socket: WebSocket) => {
+        clientAlive.set(socket, true);
+
+        socket.on("pong", () => {
+            clientAlive.set(socket, true);
+        });
+
         console.log("Authenticated WebSocket client connected");
 
         socket.send(
@@ -157,6 +358,13 @@ export function broadcast(data: unknown): void {
             client.readyState === WebSocket.OPEN &&
             projectIds?.has(projectId)
         ) {
+            if (client.bufferedAmount > maxBufferedBytes) {
+                // Too far behind to catch up: drop the connection instead of
+                // letting its queue grow without bound.
+                client.terminate();
+                continue;
+            }
+
             client.send(message);
         }
     }
