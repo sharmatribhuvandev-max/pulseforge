@@ -35,6 +35,13 @@ app.get("/", (_req, res) => {
     });
 });
 
+// Liveness check for the hosting platform. It deliberately touches no
+// database, so frequent checks never wake Neon or reveal internal state.
+app.get("/healthz", (_req, res) => {
+    res.set("Cache-Control", "no-store");
+    res.status(200).json({ status: "ok" });
+});
+
 if (!env.isProduction) {
     app.get("/test-success", (_req, res) => {
         res.status(200).json({
