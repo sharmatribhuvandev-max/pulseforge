@@ -47,6 +47,7 @@ export const getProjectIncidents = async (
                 type,
                 threshold,
                 actual_value,
+                healthy_checks,
                 started_at,
                 resolved_at
             FROM incidents
