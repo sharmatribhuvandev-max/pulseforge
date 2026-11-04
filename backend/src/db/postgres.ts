@@ -6,7 +6,10 @@ export const postgresPool = new Pool({
     port: env.postgres.port,
     user: env.postgres.user,
     password: env.postgres.password,
-    database: env.postgres.database
+    database: env.postgres.database,
+    // Fail fast instead of waiting for the OS TCP timeout when the host is
+    // unreachable. This also bounds the wait for a free client.
+    connectionTimeoutMillis: 10_000,
 });
 
 // An idle client can lose its connection, for example when Neon suspends

@@ -56,3 +56,17 @@ describe("PostgreSQL pool idle-client errors", () => {
         await pool.end();
     });
 });
+
+describe("PostgreSQL pool connection timeout", () => {
+    afterEach(() => {
+        vi.unstubAllEnvs();
+    });
+
+    it("gives up on a connection attempt after 10 seconds", async () => {
+        const pool = await loadPool();
+
+        expect(pool.options.connectionTimeoutMillis).toBe(10_000);
+
+        await pool.end();
+    });
+});
