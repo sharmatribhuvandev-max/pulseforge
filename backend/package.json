@@ -1,7 +1,7 @@
 {
-  "name": "backend",
+  "name": "pulseforge-backend",
   "version": "1.0.0",
-  "description": "",
+  "description": "PulseForge API: endpoint health checks, chaos injection, incidents and live WebSocket updates",
   "main": "index.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
@@ -11,7 +11,7 @@
     "test:watch": "vitest"
   },
   "keywords": [],
-  "author": "",
+  "author": "Tribhuvan Sharma",
   "license": "ISC",
   "type": "commonjs",
   "engines": {
