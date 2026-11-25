@@ -46,7 +46,7 @@ function makeRequest(
         userId: "user-123",
         params: { id: PROJECT_ID },
         ...overrides,
-    } as AuthRequest;
+    } as unknown as AuthRequest;
 }
 
 describe("incidentController", () => {

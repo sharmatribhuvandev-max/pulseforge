@@ -157,7 +157,7 @@ describe("initPostgres", () => {
         await initPostgres();
 
         expect(
-            logSpy.mock.calls.some(([message]) =>
+            logSpy.mock.calls.some(([message]: unknown[]) =>
                 String(message).startsWith("Closed ")
             )
         ).toBe(false);

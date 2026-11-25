@@ -216,7 +216,7 @@ describe("checkApi controller", () => {
         expect(applyLatency).not.toHaveBeenCalled();
 
         expect(postgresPool.query).toHaveBeenCalledOnce();
-        const [sql, values] = vi.mocked(postgresPool.query).mock.calls[0] as [
+        const [sql, values] = vi.mocked(postgresPool.query).mock.calls[0] as unknown as [
             string,
             unknown[],
         ];

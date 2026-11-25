@@ -62,7 +62,7 @@ function makeRequest(
         params: { projectId: PROJECT_ID },
         query: {},
         ...overrides,
-    } as AuthRequest;
+    } as unknown as AuthRequest;
 }
 
 const handlers = [

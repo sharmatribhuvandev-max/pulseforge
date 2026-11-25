@@ -48,7 +48,7 @@ describe("Trust proxy and the authentication rate limiter", () => {
         expect(limited.status).toBe(429);
 
         const codes = errorSpy.mock.calls.map(
-            (args) => (args[0] as { code?: string } | undefined)?.code,
+            (args: unknown[]) => (args[0] as { code?: string } | undefined)?.code,
         );
         expect(codes).toContain("ERR_ERL_UNEXPECTED_X_FORWARDED_FOR");
     });
