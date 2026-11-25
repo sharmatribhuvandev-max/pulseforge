@@ -1,6 +1,7 @@
-import { createServer } from "node:http";
-import { lookup } from "node:dns/promises";
-import { Agent } from "node:http";
+// Verifies the Node http.Agent behaviour that outboundRequest.ts relies on:
+// a custom lookup is called, and keep-alive reuses the socket without a
+// second lookup.
+import { Agent, createServer, request } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 
 describe("Node HTTP agent pinned lookup", () => {
@@ -56,8 +57,6 @@ describe("Node HTTP agent pinned lookup", () => {
         });
 
         try {
-            const { request } = await import("node:http");
-
             const statusCode = await new Promise<number>((resolve, reject) => {
                 const req = request(
                     {
@@ -129,9 +128,7 @@ describe("Node HTTP agent pinned lookup", () => {
             },
         });
 
-        const makeRequest = async (): Promise<number> => {
-            const { request } = await import("node:http");
-
+        const makeRequest = (): Promise<number> => {
             return new Promise<number>((resolve, reject) => {
                 const req = request(
                     {
